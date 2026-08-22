@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Star, Sparkles, Plus, Bookmark } from 'lucide-react';
+import { Star, Sparkles, Plus, Bookmark, Scale } from 'lucide-react';
 import type { Product } from '../types';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { useCompare } from '../context/CompareContext';
 import { analyzeProductAI } from '../api';
 
 interface ProductCardProps {
@@ -13,6 +14,7 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const { addToCart } = useCart();
   const { isSaved, toggleWishlist } = useWishlist();
+  const { addToCompare } = useCompare(); // Integrated Compare Context
   
   const [analyzing, setAnalyzing] = useState(false);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -34,6 +36,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
     }
   };
 
+  const handleCompare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    addToCompare(product);
+  };
+
   const saved = isSaved(product.id);
 
   return (
@@ -44,9 +51,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
       </div>
 
       <div className="w-full h-48 bg-slate-50 rounded-xl flex items-center justify-center p-3 mb-4 overflow-hidden border border-slate-100 relative">
+        {/* Wishlist Button */}
         <button onClick={(e) => { e.stopPropagation(); toggleWishlist(product); }} className={`absolute top-2 right-2 p-2 rounded-full shadow-sm bg-white hover:bg-slate-50 transition z-10 ${saved ? 'text-indigo-600' : 'text-slate-400'}`}>
           <Bookmark className={`w-4 h-4 ${saved ? 'fill-current' : ''}`} />
         </button>
+        
+        {/* NEW: Compare Button (Appears on Hover) */}
+        <button onClick={handleCompare} title="Compare Product" className="absolute top-12 right-2 p-2 rounded-full shadow-sm bg-white hover:bg-slate-50 text-slate-400 hover:text-indigo-600 transition z-10 opacity-0 group-hover:opacity-100">
+          <Scale className="w-4 h-4" />
+        </button>
+
         <img src={product.image_display_url || product.image_url || 'https://via.placeholder.com/300'} alt={product.name} className="max-h-full max-w-full object-contain group-hover:scale-105 transition duration-300" />
       </div>
 
@@ -55,6 +69,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         <p className="text-xs text-slate-500 line-clamp-2 leading-relaxed">{product.description}</p>
       </div>
 
+      {/* Retained AI Summary Section */}
       {aiSummary && (
         <div className="mb-3 p-2.5 bg-purple-50 border border-purple-100 rounded-xl text-xs text-purple-900">
           <span className="font-bold block mb-0.5 flex items-center gap-1"><Sparkles className="w-3 h-3 text-purple-600"/> AI Insight:</span>{aiSummary}
@@ -68,7 +83,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
           <span className="text-[11px] text-slate-500 block font-medium mt-0.5">{product.stock} in stock</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <button onClick={handleAiAnalysis} className="p-2.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-xl transition"><Sparkles className="w-4 h-4"/></button>
+          <button onClick={handleAiAnalysis} disabled={analyzing} className="p-2.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-xl transition disabled:opacity-50">
+            <Sparkles className="w-4 h-4"/>
+          </button>
           <button onClick={(e) => { e.stopPropagation(); addToCart(product); }} className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2.5 rounded-xl text-xs font-bold shadow-sm transition">
             <Plus className="w-3.5 h-3.5"/> Add
           </button>

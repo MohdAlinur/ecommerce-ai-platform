@@ -8,7 +8,8 @@ import { fetchProfile, logoutUser, fetchCategories, fetchProducts, loginUser, si
 import type { UserProfile, Category, Product } from './types';
 import { CartProvider, useCart } from './context/CartContext';
 import { WishlistProvider, useWishlist } from './context/WishlistContext';
-import { Search, Gift, Zap, User, Shield, LogOut, MapPin, Phone, ChevronDown, ChevronRight, X, ShoppingCart, CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark } from 'lucide-react';
+import { CompareProvider, useCompare } from './context/CompareContext';
+import { Search, User, Shield, LogOut, Phone, ChevronDown, ChevronRight, X, ShoppingCart, CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale } from 'lucide-react';
 
 const slugify = (text: string) => text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-');
 
@@ -68,13 +69,9 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
   useEffect(() => { 
     let timeoutId: ReturnType<typeof setTimeout>;
     if (!isCartOpen) {
-      timeoutId = setTimeout(() => {
-        setStep('cart');
-      }, 300);
+      timeoutId = setTimeout(() => { setStep('cart'); }, 300);
     }
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-    };
+    return () => { if (timeoutId) clearTimeout(timeoutId); };
   }, [isCartOpen]);
 
   const cartTotal = cartItems.reduce((total, item) => total + (Number(item.product.cash_discount_price || item.product.price || 0) * item.quantity), 0);
@@ -159,12 +156,6 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
                 <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white"><CreditCard className="w-5 h-5"/></div>
                 <div><h4 className="font-bold">Credit / Debit Card</h4></div>
               </label>
-              {paymentMethod === 'card' && (
-                <div className="bg-white p-4 rounded-xl border border-indigo-200 space-y-3">
-                  <input type="text" placeholder="Card Number" className="w-full border p-2.5 rounded-lg text-sm" />
-                  <div className="flex gap-2"><input type="text" placeholder="MM/YY" className="w-1/2 border p-2.5 rounded-lg" /><input type="text" placeholder="CVC" className="w-1/2 border p-2.5 rounded-lg" /></div>
-                </div>
-              )}
 
               <label className={`flex items-center gap-3 p-4 rounded-xl border cursor-pointer ${paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50 ring-1 ring-emerald-600' : 'bg-white'}`}>
                 <input type="radio" value="cod" className="sr-only" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
@@ -199,6 +190,91 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
   );
 }
 
+function CompareDrawer() {
+  const { compareItems, removeFromCompare, clearCompare, isCompareOpen, closeCompare } = useCompare();
+
+  if (!isCompareOpen) return null;
+
+  const handleAICompare = () => {
+    if (compareItems.length === 2) {
+      window.dispatchEvent(new CustomEvent('open-ai-compare', { detail: compareItems }));
+      closeCompare();
+    } else {
+      alert("Please select exactly 2 products to compare with the AI Agent.");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex justify-end">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeCompare}></div>
+      <div className="relative w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col">
+        <div className="p-4 border-b flex items-center justify-between bg-slate-50">
+          <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+            <Scale className="w-5 h-5 text-indigo-600"/> Product Comparison
+          </h2>
+          <button onClick={closeCompare} className="p-2 hover:bg-slate-200 rounded-full"><X className="w-5 h-5"/></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+          {compareItems.length === 0 ? (
+            <div className="text-center mt-32 space-y-2">
+              <Scale className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-slate-900">No Products Selected</h3>
+              <p className="text-sm text-slate-500">You have not chosen any products to compare.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 h-full">
+              {compareItems.map((product) => (
+                <div key={product.id} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col relative overflow-hidden">
+                  <button onClick={() => removeFromCompare(product.id)} className="absolute top-2 right-2 p-1.5 bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition z-10">
+                    <X className="w-4 h-4" />
+                  </button>
+                  <div className="p-4 h-48 flex items-center justify-center border-b border-slate-50">
+                    <img src={product.image_display_url || product.image_url} alt={product.name} className="max-h-full object-contain" />
+                  </div>
+                  <div className="p-4 flex-1 flex flex-col">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{product.brand || product.category_name}</span>
+                    <h3 className="font-bold text-sm text-slate-900 mb-2 line-clamp-2">{product.name}</h3>
+                    <p className="text-[#ef4a23] font-black text-lg mb-4">৳{Number(product.cash_discount_price || product.price || 0).toLocaleString()}</p>
+                    
+                    <div className="mt-auto space-y-2">
+                      <h4 className="text-xs font-bold text-slate-900 border-b pb-1">Key Features:</h4>
+                      <ul className="text-xs text-slate-600 space-y-1">
+                        {Array.isArray(product.key_features) && product.key_features.slice(0, 4).map((f, i) => (
+                          <li key={i} className="line-clamp-1 flex gap-1"><span className="text-indigo-400">•</span> {typeof f === 'string' ? f : JSON.stringify(f)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {compareItems.length === 1 && (
+                <div className="bg-slate-100/50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+                  <Search className="w-8 h-8 mb-2 opacity-50" />
+                  <p className="text-sm font-bold">Add another product<br/>to compare</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {compareItems.length > 0 && (
+          <div className="p-4 border-t bg-white flex gap-3">
+            <button onClick={clearCompare} className="px-4 py-3 border font-bold text-slate-600 rounded-xl hover:bg-slate-50 transition w-1/3">Clear All</button>
+            <button 
+              onClick={handleAICompare} 
+              disabled={compareItems.length !== 2}
+              className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition"
+            >
+              <Sparkles className="w-4 h-4" /> Compare with AI Agent
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<{role: 'user'|'ai', content: string}[]>([{ role: 'ai', content: 'Hi! I am your AuraTech AI. How can I help?' }]);
@@ -207,9 +283,33 @@ const AIAssistant: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
+    if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
+    const handleAICompareEvent = async (e: any) => {
+      const items = e.detail as Product[];
+      setIsOpen(true);
+      const userPrompt = `Compare these two products and tell me which one is better: 1. ${items[0].name} (Price: ৳${items[0].cash_discount_price}) and 2. ${items[1].name} (Price: ৳${items[1].cash_discount_price})`;
+      
+      const contextPayload = JSON.stringify(items.map(i => ({
+        name: i.name, brand: i.brand, price: i.cash_discount_price,
+        features: i.key_features, specs: i.specifications
+      })));
+
+      setMessages(prev => [...prev, { role: 'user', content: userPrompt }]);
+      setIsTyping(true);
+      try {
+        const history = messages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.content }] }));
+        const response = await sendSupportChatMessage(history, userPrompt, contextPayload);
+        setMessages(prev => [...prev, { role: 'ai', content: response.reply }]);
+      } catch {
+        setMessages(prev => [...prev, { role: 'ai', content: 'Connection error while comparing.' }]);
+      } finally { setIsTyping(false); }
+    };
+
+    window.addEventListener('open-ai-compare', handleAICompareEvent);
+    return () => window.removeEventListener('open-ai-compare', handleAICompareEvent);
   }, [messages]);
 
   const handleSend = async (e: React.FormEvent) => {
@@ -240,7 +340,7 @@ const AIAssistant: React.FC = () => {
               <div className={`max-w-[85%] p-3 text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white border rounded-2xl rounded-bl-sm shadow-sm'}`}>{m.content}</div>
             </div>
           ))}
-          {isTyping && <div className="text-xs text-slate-500">AI is typing...</div>}
+          {isTyping && <div className="text-xs text-slate-500">AI is analyzing...</div>}
           <div ref={messagesEndRef} />
         </div>
         <form onSubmit={handleSend} className="p-3 border-t bg-white rounded-b-2xl flex gap-2">
@@ -258,67 +358,46 @@ function CategoryNavBar() {
   
   useEffect(() => { 
     let isMounted = true;
-    Promise.all([fetchCategories(), fetchProducts()])
-      .then(([cats, prods]) => { 
-        if (isMounted) {
-          setCategories(cats); 
-          setProducts(prods); 
-        }
-      })
-      .catch(console.error);
-      
+    Promise.all([fetchCategories(), fetchProducts()]).then(([cats, prods]) => { 
+      if (isMounted) { setCategories(cats); setProducts(prods); }
+    }).catch(console.error);
     return () => { isMounted = false; };
   }, []);
   
   const getBrands = (cat: Category) => {
     const matchedProds = products.filter(p => {
-      const matchId = p.category === cat.id;
-      const matchName = String(p.category_name || '').toLowerCase() === String(cat.name || '').toLowerCase();
-      return matchId || matchName;
+      return String(p.category) === String(cat.id) || String(p.category_name || '').toLowerCase() === String(cat.name || '').toLowerCase();
     });
-    return Array.from(new Set(matchedProds.map(p => p.brand).filter(b => b && b.trim() !== '')));
+    return Array.from(new Set(matchedProds.map(p => p.brand).filter(b => Boolean(b) && String(b).trim() !== '')));
   };
 
   return (
     <nav className="bg-white border-b shadow-sm sticky top-20 z-40 hidden md:block">
-      <div className="max-w-7xl mx-auto px-4 h-12 flex items-center gap-8 text-sm font-bold text-slate-800 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <Link to="/" className="hover:text-[#ef4a23] h-full flex items-center transition">All Products</Link>
+      <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center text-sm font-bold text-slate-800 relative z-50">
+        <Link to="/" className="hover:text-[#ef4a23] h-12 flex items-center pr-6 transition">All Products</Link>
         {categories.map(cat => {
           const brands = getBrands(cat);
           return (
-            <div key={cat.id} className="group/cat relative h-full flex items-center cursor-pointer">
-              <Link to={`/?category=${cat.slug}`} className="hover:text-[#ef4a23] transition flex items-center gap-1.5 h-full py-3">
+            <div key={cat.id} className="group inline-block relative h-12">
+              <Link to={`/?category=${cat.slug}`} className="hover:text-[#ef4a23] transition flex items-center gap-1.5 h-full px-3">
                 <span>{cat.name}</span>
-                {brands.length > 0 && <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover/cat:text-[#ef4a23] transition" />}
+                {brands.length > 0 && <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#ef4a23] transition" />}
               </Link>
-              
               {brands.length > 0 && (
-                <div className="absolute top-full left-0 pt-1 w-60 z-50 opacity-0 invisible group-hover/cat:opacity-100 group-hover/cat:visible transition-all duration-200 transform origin-top">
-                  <div className="bg-white border border-slate-200 shadow-2xl rounded-b-xl flex flex-col py-2">
-                    <div className="px-4 py-2 text-[10px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">Categories / Brands</div>
-                    {brands.map((brand, idx) => (
-                      <div key={idx} className="group/brand relative">
-                        <Link 
-                          to={`/?search=${encodeURIComponent(brand)}`} 
-                          className="px-4 py-2.5 hover:bg-[#ef4a23] hover:text-white text-sm font-semibold text-slate-700 transition flex items-center justify-between"
-                        >
-                          <span>{brand}</span>
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover/brand:text-white transition" />
-                        </Link>
-                        
-                        <div className="absolute top-0 left-full w-48 bg-white border border-slate-200 shadow-2xl rounded-xl py-2 opacity-0 invisible group-hover/brand:opacity-100 group-hover/brand:visible transition-all duration-200 z-50">
-                          <div className="px-4 py-1.5 text-[9px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-100 mb-1">{brand} Lineup</div>
-                          <Link to={`/?search=${encodeURIComponent(brand)}`} className="block px-4 py-2 text-xs font-bold text-slate-700 hover:bg-[#ef4a23] hover:text-white transition">
-                            All {brand} Models
-                          </Link>
-                        </div>
-                      </div>
-                    ))}
-                    <Link to={`/?category=${cat.slug}`} className="px-4 py-3 bg-slate-50 hover:bg-slate-100 text-xs font-black text-[#ef4a23] border-t border-slate-100 mt-1 transition text-center uppercase tracking-wider">
+                <ul className="absolute hidden group-hover:block top-full left-0 bg-white border-t-2 border-t-[#ef4a23] shadow-[0_10px_25px_rgba(0,0,0,0.1)] rounded-b-md w-56 z-50 py-2">
+                  {brands.map((brand, idx) => (
+                    <li key={idx} className="relative group/sub hover:bg-slate-50 transition-colors">
+                      <Link to={`/?search=${encodeURIComponent(brand)}`} className="px-4 py-2.5 text-[13px] font-semibold text-slate-700 hover:text-[#ef4a23] flex items-center justify-between">
+                        <span>{brand}</span>
+                      </Link>
+                    </li>
+                  ))}
+                  <li className="bg-slate-50 border-t border-slate-100 mt-1">
+                    <Link to={`/?category=${cat.slug}`} className="block px-4 py-2.5 text-center text-xs font-black text-[#3749bb] hover:text-[#ef4a23] transition uppercase tracking-wider">
                       View All {cat.name}
                     </Link>
-                  </div>
-                </div>
+                  </li>
+                </ul>
               )}
             </div>
           );
@@ -328,10 +407,11 @@ function CategoryNavBar() {
   );
 }
 
-// --- OPTIMIZED NAVIGATION HEADER WITH LIVE AUTOCOMPLETE SEARCH ---
 function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | null; onLogout: () => void; onOpenAuth: () => void }) {
   const { cartItems, openCart } = useCart();
   const { wishlistItems } = useWishlist();
+  const { compareItems, openCompare } = useCompare();
+  
   const cartItemCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const wishlistCount = wishlistItems.length;
   
@@ -341,30 +421,21 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
   const searchRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Live search suggestions as user types
   useEffect(() => {
     const handler = setTimeout(async () => {
       if (searchTerm.trim().length >= 1) {
         try {
           const results = await fetchProducts(undefined, searchTerm.trim());
-          setSuggestions(results.slice(0, 5)); // Limit to top 5 suggestions
-        } catch (err) {
-          setSuggestions([]);
-        }
-      } else {
-        setSuggestions([]);
-      }
-    }, 250); // 250ms debounce for high performance
-
+          setSuggestions(results.slice(0, 5));
+        } catch (err) { setSuggestions([]); }
+      } else { setSuggestions([]); }
+    }, 250);
     return () => clearTimeout(handler);
   }, [searchTerm]);
 
-  // Close suggestions dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setIsFocused(false);
-      }
+      if (searchRef.current && !searchRef.current.contains(event.target as Node)) setIsFocused(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -388,7 +459,6 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
           <div><h1 className="font-black text-2xl tracking-tight leading-none">AuraTech</h1><span className="text-[10px] text-indigo-300 font-bold uppercase tracking-widest">Smart E-Commerce</span></div>
         </Link>
         
-        {/* FULLY FUNCTIONAL SEARCH BAR WITH LIVE SUGGESTIONS DROPDOWN */}
         <div ref={searchRef} className="flex-1 max-w-2xl hidden md:block relative">
           <form onSubmit={handleSearchSubmit} className="relative flex items-center">
             <input 
@@ -397,14 +467,13 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onFocus={() => setIsFocused(true)}
-              className="w-full py-2.5 pl-4 pr-12 rounded-lg bg-slate-900 border border-slate-700 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition shadow-inner"
+              className="w-full py-2.5 pl-4 pr-12 rounded-lg bg-[#142330] border border-slate-700 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#3749bb] focus:ring-1 focus:ring-[#3749bb] transition"
             />
             <button type="submit" className="absolute right-3 p-1 text-slate-400 hover:text-white transition">
               <Search className="w-5 h-5" />
             </button>
           </form>
 
-          {/* AUTOCOMPLETE SUGGESTIONS DROPDOWN */}
           {isFocused && suggestions.length > 0 && (
             <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden z-50 py-2">
               <div className="px-4 py-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider border-b border-slate-100">Suggestions</div>
@@ -412,8 +481,7 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
                 <div 
                   key={product.id}
                   onClick={() => {
-                    setIsFocused(false);
-                    setSearchTerm('');
+                    setIsFocused(false); setSearchTerm('');
                     navigate(`/product/${product.id}/${slugify(product.name)}`);
                   }}
                   className="px-4 py-3 hover:bg-slate-50 transition flex items-center gap-3 cursor-pointer border-b border-slate-50 last:border-0"
@@ -426,13 +494,7 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
                   <span className="font-black text-sm text-[#ef4a23] shrink-0">৳{Number(product.cash_discount_price || product.price || 0).toLocaleString()}</span>
                 </div>
               ))}
-              <div 
-                onClick={() => {
-                  setIsFocused(false);
-                  navigate(`/?search=${encodeURIComponent(searchTerm.trim())}`);
-                }}
-                className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-center text-xs font-bold text-[#3749bb] cursor-pointer border-t border-slate-100 transition"
-              >
+              <div onClick={() => { setIsFocused(false); navigate(`/?search=${encodeURIComponent(searchTerm.trim())}`); }} className="px-4 py-2.5 bg-slate-50 hover:bg-slate-100 text-center text-xs font-bold text-[#3749bb] cursor-pointer border-t border-slate-100 transition">
                 View all results for "{searchTerm}"
               </div>
             </div>
@@ -441,6 +503,13 @@ function NavigationHeader({ user, onLogout, onOpenAuth }: { user: UserProfile | 
 
         <div className="flex items-center gap-6 shrink-0">
           
+          <button onClick={openCompare} className="relative flex items-center gap-2 cursor-pointer hover:text-indigo-400 transition text-white">
+            <div className="relative">
+              <Scale className="w-6 h-6" />
+              {compareItems.length > 0 && <span className="absolute -top-2 -right-2 bg-indigo-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center shadow">{compareItems.length}</span>}
+            </div>
+          </button>
+
           <button onClick={() => navigate('/dashboard')} className="relative flex items-center gap-2 cursor-pointer hover:text-indigo-400 transition text-white">
             <div className="relative">
               <Bookmark className="w-6 h-6" />
@@ -518,13 +587,7 @@ export function App() {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
 
   const loadProfile = () => {
-    fetchProfile()
-      .then((data) => {
-        setUser(data);
-      })
-      .catch(() => {
-        setUser(null);
-      });
+    fetchProfile().then((data) => setUser(data)).catch(() => setUser(null));
   };
 
   useEffect(() => { loadProfile(); }, []);
@@ -532,27 +595,30 @@ export function App() {
   return (
     <WishlistProvider>
       <CartProvider>
-        <Router>
-          <div className="min-h-screen bg-[#f2f4f8] text-slate-900 flex flex-col relative">
-            <NavigationHeader user={user} onLogout={() => { logoutUser().then(() => window.location.href = '/'); }} onOpenAuth={() => setIsAuthOpen(true)} />
-            <CategoryNavBar />
-            
-            <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} onSuccess={() => { setIsAuthOpen(false); loadProfile(); }} />
-            <CartDrawer user={user} />
-            <AIAssistant />
+        <CompareProvider>
+          <Router>
+            <div className="min-h-screen bg-[#f2f4f8] text-slate-900 flex flex-col relative">
+              <NavigationHeader user={user} onLogout={() => { logoutUser().then(() => window.location.href = '/'); }} onOpenAuth={() => setIsAuthOpen(true)} />
+              <CategoryNavBar />
+              
+              <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} onSuccess={() => { setIsAuthOpen(false); loadProfile(); }} />
+              <CartDrawer user={user} />
+              <CompareDrawer />
+              <AIAssistant />
 
-            <main className="flex-1">
-              <Routes>
-                <Route path="/" element={<StorePage onProductSelect={(p) => window.location.href = `/product/${p.id}/${slugify(p.name)}`} />} />
-                <Route path="/product/:id" element={<ProductDetailPageWrapper />} />
-                <Route path="/product/:id/:slug" element={<ProductDetailPageWrapper />} />
-                <Route path="/dashboard" element={<CustomerDashboard user={user} onProfileUpdate={loadProfile} />} />
-                <Route path="/admin" element={<AdminDashboard />} />
-              </Routes>
-            </main>
-            <Footer />
-          </div>
-        </Router>
+              <main className="flex-1">
+                <Routes>
+                  <Route path="/" element={<StorePage onProductSelect={(p) => window.location.href = `/product/${p.id}/${slugify(p.name)}`} />} />
+                  <Route path="/product/:id" element={<ProductDetailPageWrapper />} />
+                  <Route path="/product/:id/:slug" element={<ProductDetailPageWrapper />} />
+                  <Route path="/dashboard" element={<CustomerDashboard user={user} onProfileUpdate={loadProfile} />} />
+                  <Route path="/admin" element={<AdminDashboard />} />
+                </Routes>
+              </main>
+              <Footer />
+            </div>
+          </Router>
+        </CompareProvider>
       </CartProvider>
     </WishlistProvider>
   );

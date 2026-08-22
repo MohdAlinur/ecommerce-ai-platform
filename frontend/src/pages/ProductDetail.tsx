@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Home, Star, Share2, Bookmark, CheckSquare, Sparkles, MessageSquare, Send } from 'lucide-react';
+import { Home, Star, Share2, Bookmark, CheckSquare, Sparkles, MessageSquare, Send, Scale } from 'lucide-react';
 import { analyzeProductAI, fetchProducts, submitReview } from '../api';
 import type { Product, AIReviewAnalysis } from '../types';
 import axios from 'axios';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
+import { useCompare } from '../context/CompareContext'; // IMPORTED COMPARE CONTEXT
 
 interface ProductDetailProps {
   productId?: number | string;
@@ -18,6 +19,7 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ productId }) => {
   
   const { addToCart, openCart } = useCart();
   const { isSaved, toggleWishlist } = useWishlist();
+  const { addToCompare } = useCompare(); // INITIALIZED COMPARE HOOK
 
   const [product, setProduct] = useState<Product | null>(null);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
@@ -112,6 +114,10 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ productId }) => {
           <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Link copied!'); }} className="flex items-center gap-2 hover:text-[#3749bb]"><Share2 className="w-4 h-4"/> Share</button>
           <button onClick={() => toggleWishlist(product)} className={`flex items-center gap-2 hover:text-[#3749bb] transition ${saved ? 'text-[#3749bb] font-bold' : ''}`}>
             <Bookmark className={`w-4 h-4 ${saved ? 'fill-current' : ''}`}/> {saved ? 'Saved' : 'Save'}
+          </button>
+          {/* FUNCTIONAL COMPARE BUTTON */}
+          <button onClick={() => addToCompare(product)} className="flex items-center gap-2 hover:text-[#3749bb] transition">
+            <Scale className="w-4 h-4" /> Compare
           </button>
         </div>
       </div>
