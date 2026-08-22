@@ -277,7 +277,7 @@ function CompareDrawer() {
 
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<{role: 'user'|'ai', content: string}[]>([{ role: 'ai', content: 'Hi! I am your AuraTech AI. How can I help?' }]);
+  const [messages, setMessages] = useState<{role: 'user'|'ai', content: string}[]>([{ role: 'ai', content: 'Hi! I am your AuraTech AI. I can find the best products for you, answer technical questions, or compare items. How can I help?' }]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -286,16 +286,19 @@ const AIAssistant: React.FC = () => {
     if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // AI Compare Event Integration
   useEffect(() => {
     const handleAICompareEvent = async (e: any) => {
       const items = e.detail as Product[];
       setIsOpen(true);
       const userPrompt = `Compare these two products and tell me which one is better: 1. ${items[0].name} (Price: ৳${items[0].cash_discount_price}) and 2. ${items[1].name} (Price: ৳${items[1].cash_discount_price})`;
       
-      const contextPayload = JSON.stringify(items.map(i => ({
-        name: i.name, brand: i.brand, price: i.cash_discount_price,
-        features: i.key_features, specs: i.specifications
-      })));
+      const contextPayload = JSON.stringify({
+        comparison_data: items.map(i => ({
+          name: i.name, brand: i.brand, price: i.cash_discount_price,
+          features: i.key_features, specs: i.specifications
+        }))
+      });
 
       setMessages(prev => [...prev, { role: 'user', content: userPrompt }]);
       setIsTyping(true);
@@ -312,40 +315,60 @@ const AIAssistant: React.FC = () => {
     return () => window.removeEventListener('open-ai-compare', handleAICompareEvent);
   }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim()) return;
-    const userMsg = input;
-    setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
+  const handleSend = async (messageText: string) => {
+    if (!messageText.trim()) return;
+    setMessages(prev => [...prev, { role: 'user', content: messageText }]);
     setInput(''); setIsTyping(true);
+
     try {
       const history = messages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.content }] }));
-      const response = await sendSupportChatMessage(history, userMsg);
+      // Clean request directly sent to backend where the master prompt lives securely
+      const response = await sendSupportChatMessage(history, messageText);
       setMessages(prev => [...prev, { role: 'ai', content: response.reply }]);
     } catch {
       setMessages(prev => [...prev, { role: 'ai', content: 'Connection error. Try again later.' }]);
     } finally { setIsTyping(false); }
   };
 
+  const quickActions = [
+    "Find a gaming laptop under ৳100,000",
+    "What's the best monitor for office work?",
+    "Help me choose a budget smartphone"
+  ];
+
   return (
     <>
       <button onClick={() => setIsOpen(true)} className={`fixed bottom-6 right-6 z-40 bg-indigo-600 text-white p-4 rounded-full shadow-2xl transition transform hover:scale-110 flex items-center gap-2 ${isOpen ? 'scale-0' : 'scale-100'}`}>
         <Bot className="w-6 h-6" /><span className="font-bold pr-2 hidden sm:block">AI Assistant</span>
       </button>
-      <div className={`fixed bottom-6 right-6 z-50 w-[350px] bg-white rounded-2xl shadow-2xl flex flex-col transition-all duration-300 transform origin-bottom-right ${isOpen ? 'scale-100' : 'scale-0 pointer-events-none'}`} style={{ height: '500px' }}>
+      <div className={`fixed bottom-6 right-6 z-50 w-[380px] bg-white rounded-2xl shadow-2xl flex flex-col transition-all duration-300 transform origin-bottom-right ${isOpen ? 'scale-100' : 'scale-0 pointer-events-none'}`} style={{ height: '550px' }}>
         <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 rounded-t-2xl flex justify-between items-center text-white"><div className="flex items-center gap-2"><Sparkles className="w-5 h-5" /><h3 className="font-bold">Aura AI Agent</h3></div><button onClick={() => setIsOpen(false)}><X className="w-5 h-5" /></button></div>
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
           {messages.map((m, idx) => (
             <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] p-3 text-sm ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white border rounded-2xl rounded-bl-sm shadow-sm'}`}>{m.content}</div>
+              <div className={`max-w-[85%] p-3 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white border border-slate-200 shadow-sm rounded-2xl rounded-bl-sm text-slate-800'}`}>
+                {m.content}
+              </div>
             </div>
           ))}
-          {isTyping && <div className="text-xs text-slate-500">AI is analyzing...</div>}
+          
+          {/* Quick Action Chips for New Users */}
+          {messages.length === 1 && !isTyping && (
+            <div className="flex flex-col gap-2 mt-4">
+              {quickActions.map((action, idx) => (
+                <button key={idx} onClick={() => handleSend(action)} className="text-[12px] bg-white border border-indigo-100 text-indigo-700 px-3 py-2 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-left font-semibold">
+                  {action}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {isTyping && <div className="text-xs text-slate-500 font-medium flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse"/> AI is thinking...</div>}
           <div ref={messagesEndRef} />
         </div>
-        <form onSubmit={handleSend} className="p-3 border-t bg-white rounded-b-2xl flex gap-2">
-          <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder="Ask a question..." className="flex-1 bg-slate-100 px-4 py-2 rounded-full text-sm outline-none text-slate-900" />
-          <button type="submit" disabled={!input.trim() || isTyping} className="bg-indigo-600 text-white p-2 rounded-full disabled:opacity-50"><Send className="w-4 h-4" /></button>
+        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="p-3 border-t bg-white rounded-b-2xl flex gap-2">
+          <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about any product..." className="flex-1 bg-slate-100 px-4 py-2.5 rounded-full text-sm outline-none text-slate-900 focus:ring-1 focus:ring-indigo-500" />
+          <button type="submit" disabled={!input.trim() || isTyping} className="bg-indigo-600 text-white p-2.5 rounded-full shadow-sm disabled:opacity-50 hover:bg-indigo-700 transition"><Send className="w-4 h-4" /></button>
         </form>
       </div>
     </>
