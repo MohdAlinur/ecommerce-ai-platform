@@ -1,5 +1,4 @@
 import json
-import google.generativeai as genai
 from decimal import Decimal
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
@@ -12,15 +11,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAdminUser, IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
+# NEW GOOGLE SDK IMPORTS
+from google import genai
+from google.genai import types
+
 from .models import Category, Product, Review, Order, OrderItem, CustomerProfile
 from .serializers import CategorySerializer, ProductSerializer, ReviewSerializer, OrderSerializer, UserSerializer
 from .ai_services import analyze_product_reviews_ai
-
-# Configure Gemini API securely from your settings
-try:
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-except AttributeError:
-    pass
 
 # ==================================================
 # MASTER AI SHOPPING AGENT SYSTEM PROMPT
@@ -324,20 +321,27 @@ def ai_customer_support_view(request):
         product_context = "Explicit Product Comparison Data:\n" + str(product_context)
 
     try:
-        # Format history for Gemini SDK
+        # 1. Initialize the new SDK Client
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+        # 2. Format history strictly for the new SDK structure
         gemini_history = []
         for msg in history:
-            gemini_history.append({
-                "role": "user" if msg['role'] == 'user' else "model",
-                "parts": [msg['parts'][0]['text']]
-            })
+            gemini_history.append(
+                types.Content(
+                    role="user" if msg['role'] == 'user' else "model",
+                    parts=[types.Part.from_text(text=msg['parts'][0]['text'])]
+                )
+            )
 
-        # Initialize the strictly controlled AI Agent
-        model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            system_instruction=SHOPPING_AGENT_PROMPT
+        # 3. Initialize the strictly controlled AI Agent using new syntax
+        chat = client.chats.create(
+            model='gemini-3.6-flash',  # Updated to the version required for new keys
+            config=types.GenerateContentConfig(
+                system_instruction=SHOPPING_AGENT_PROMPT,
+            ),
+            history=gemini_history
         )
-        chat = model.start_chat(history=gemini_history)
 
         full_message = f"PRODUCT DATABASE CONTEXT:\n{product_context}\n\nUSER REQUEST: {message}"
         response = chat.send_message(full_message)
