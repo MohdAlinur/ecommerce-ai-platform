@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Product } from '../types';
 
 interface CompareContextType {
@@ -17,26 +17,48 @@ export const CompareProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [compareItems, setCompareItems] = useState<Product[]>([]);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
 
+  // Load from local storage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('aura_compare');
+    if (stored) {
+      try {
+        setCompareItems(JSON.parse(stored));
+      } catch (e) {
+        console.error('Failed to parse compare items');
+      }
+    }
+  }, []);
+
+  // Save to local storage on change
+  useEffect(() => {
+    localStorage.setItem('aura_compare', JSON.stringify(compareItems));
+  }, [compareItems]);
+
   const addToCompare = (product: Product) => {
-    setCompareItems(prev => {
-      if (prev.find(item => item.id === product.id)) {
-        alert('Product is already in the comparison list.');
-        return prev;
-      }
-      if (prev.length >= 2) {
-        alert('You can only compare up to 2 products at a time for optimal AI analysis.');
-        return prev;
-      }
-      setIsCompareOpen(true);
-      return [...prev, product];
-    });
+    // Prevent adding duplicates
+    if (compareItems.some(item => item.id === product.id)) {
+      alert('This product is already in your comparison list.');
+      return;
+    }
+    
+    // Expanded Limit for Multi-Product AI Analysis
+    if (compareItems.length >= 4) {
+      alert('You can compare a maximum of 4 products at a time to ensure optimal AI accuracy.');
+      return;
+    }
+    
+    setCompareItems(prev => [...prev, product]);
+    setIsCompareOpen(true);
   };
 
   const removeFromCompare = (productId: number) => {
     setCompareItems(prev => prev.filter(item => item.id !== productId));
   };
 
-  const clearCompare = () => setCompareItems([]);
+  const clearCompare = () => {
+    setCompareItems([]);
+  };
+
   const openCompare = () => setIsCompareOpen(true);
   const closeCompare = () => setIsCompareOpen(false);
 
@@ -49,6 +71,8 @@ export const CompareProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
 export const useCompare = () => {
   const context = useContext(CompareContext);
-  if (!context) throw new Error('useCompare must be used within CompareProvider');
+  if (context === undefined) {
+    throw new Error('useCompare must be used within a CompareProvider');
+  }
   return context;
 };

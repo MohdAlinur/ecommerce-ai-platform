@@ -9,50 +9,168 @@ import type { UserProfile, Category, Product } from './types';
 import { CartProvider, useCart } from './context/CartContext';
 import { WishlistProvider, useWishlist } from './context/WishlistContext';
 import { CompareProvider, useCompare } from './context/CompareContext';
-import { Search, User, Shield, LogOut, Phone, ChevronDown, ChevronRight, X, ShoppingCart, CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale } from 'lucide-react';
+import { Search, User, Shield, LogOut, Phone, ChevronDown, ChevronRight, X, ShoppingCart, CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale, Eye, EyeOff, Menu } from 'lucide-react';
 
 const slugify = (text: string) => text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-');
 
 function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [formData, setFormData] = useState({ username: '', email: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', phone: '', email: '', password: '', confirmPassword: '' });
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  
+
+  useEffect(() => {
+    if (!isOpen) return;
+    
+    const script = document.createElement('script');
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+
+    script.onload = () => {
+      if ((window as any).google) {
+        (window as any).google.accounts.id.initialize({
+          client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com', 
+          callback: async (response: any) => {
+            setLoading(true);
+            try {
+              const res = await fetch('http://127.0.0.1:8000/api/auth/google/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: response.credential })
+              });
+              if (!res.ok) throw new Error('Google Authentication failed.');
+              onSuccess();
+            } catch (err: any) {
+              setError(err.message || 'Google Authentication failed.');
+            } finally {
+              setLoading(false);
+            }
+          }
+        });
+        (window as any).google.accounts.id.renderButton(
+          document.getElementById('googleSignInDiv'),
+          { theme: 'outline', size: 'large', width: 350 }
+        );
+      }
+    };
+  }, [isOpen, mode]);
+
   if (!isOpen) return null;
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); 
     setError(''); 
+    
+    if (mode === 'signup') {
+      if (formData.password.length < 8) return setError("Password must be at least 8 characters.");
+      if (formData.password !== formData.confirmPassword) return setError("Passwords do not match.");
+    }
+
     setLoading(true);
     try {
       if (mode === 'login') {
-        await loginUser({ username: formData.username, password: formData.password });
+        await loginUser({ email: formData.email, password: formData.password });
       } else {
-        await signupUser(formData);
+        await signupUser({ name: formData.name, phone: formData.phone, email: formData.email, password: formData.password });
       }
       onSuccess();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Authentication failed.');
+      setError(err.response?.data?.error || 'Authentication failed. Please check your inputs.');
     } finally { 
       setLoading(false); 
     }
   };
-  
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full"><X className="w-5 h-5" /></button>
-        <h2 className="text-2xl font-black text-slate-900 mb-6 text-center">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 relative my-8">
+        <button onClick={onClose} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 p-1.5 rounded-full transition"><X className="w-5 h-5" /></button>
+        
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-black text-slate-900 mb-1">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+          <p className="text-sm text-slate-500">{mode === 'login' ? 'Sign in to your account' : 'Join to start shopping'}</p>
+        </div>
+
         {error && <div className="mb-4 p-3 bg-rose-50 text-rose-600 text-xs font-bold rounded-lg text-center">{error}</div>}
+        
         <form onSubmit={handleSubmit} className="space-y-4">
-          <input type="text" required className="w-full border p-3 rounded-xl text-sm" value={formData.username} onChange={e => setFormData({...formData, username: e.target.value})} placeholder="Username" />
-          {mode === 'signup' && <input type="email" className="w-full border p-3 rounded-xl text-sm" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Email (Optional)" />}
-          <input type="password" required className="w-full border p-3 rounded-xl text-sm" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Password" />
-          <button type="submit" disabled={loading} className="w-full py-3 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-md">{loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}</button>
+          
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Name <span className="text-rose-500">*</span></label>
+              <input type="text" required className="w-full border border-slate-200 p-3 rounded-xl text-sm focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none transition" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="Enter full name" />
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Email address <span className="text-rose-500">*</span></label>
+            <input type="email" required className="w-full border border-slate-200 p-3 rounded-xl text-sm focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none transition" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="Enter email address" />
+          </div>
+
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Phone number <span className="text-rose-500">*</span></label>
+              <input type="tel" required className="w-full border border-slate-200 p-3 rounded-xl text-sm focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none transition" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="Phone number" />
+            </div>
+          )}
+
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-xs font-bold text-slate-700">Password <span className="text-rose-500">*</span></label>
+              {mode === 'signup' && <span className="text-[10px] text-slate-400 font-semibold">Minimum 8 characters</span>}
+            </div>
+            <div className="relative">
+              <input type={showPassword ? "text" : "password"} required className="w-full border border-slate-200 p-3 pr-10 rounded-xl text-sm focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none transition" value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="Enter password" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          {mode === 'signup' && (
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Repeat password <span className="text-rose-500">*</span></label>
+              <div className="relative">
+                <input type={showConfirmPassword ? "text" : "password"} required className="w-full border border-slate-200 p-3 pr-10 rounded-xl text-sm focus:border-indigo-600 focus:ring-1 focus:ring-indigo-600 outline-none transition" value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} placeholder="Confirm password" />
+                <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600">
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === 'login' && (
+            <div className="flex items-center justify-between text-xs py-1">
+              <label className="flex items-center gap-1.5 cursor-pointer text-slate-600">
+                <input type="checkbox" className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-600" />
+                <span className="font-semibold">Remember me</span>
+              </label>
+              <a href="#" className="text-indigo-600 font-bold hover:underline">Forgotten password?</a>
+            </div>
+          )}
+
+          <button type="submit" disabled={loading} className="w-full py-3.5 bg-[#3749bb] hover:bg-indigo-800 text-white rounded-xl text-sm font-bold shadow-md transition disabled:opacity-70 mt-2">
+            {loading ? 'Processing...' : mode === 'login' ? 'Login' : 'Register'}
+          </button>
         </form>
-        <div className="mt-6 text-center text-sm text-slate-600">
-          <button onClick={() => setMode(mode === 'login' ? 'signup' : 'login')} className="text-indigo-600 hover:underline">{mode === 'login' ? 'Register Now' : 'Sign In'}</button>
+
+        <div className="mt-6 flex items-center justify-center space-x-2">
+          <span className="h-px bg-slate-200 flex-1"></span>
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Or</span>
+          <span className="h-px bg-slate-200 flex-1"></span>
+        </div>
+
+        <div id="googleSignInDiv" className="mt-6 flex justify-center w-full"></div>
+
+        <div className="mt-6 text-center text-sm font-medium text-slate-600">
+          {mode === 'login' ? "Don't have an account? " : "Already registered? "}
+          <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }} className="text-[#3749bb] font-bold hover:underline">
+            {mode === 'login' ? 'Register now' : 'Sign in'}
+          </button>
         </div>
       </div>
     </div>
@@ -102,7 +220,7 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
       <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col">
         <div className="p-4 border-b flex items-center justify-between bg-slate-50">
           <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-            <ShoppingCart className="w-5 h-5 text-indigo-600"/> 
+            <ShoppingCart className="w-5 h-5 text-[#3749bb]"/> 
             {step === 'cart' ? 'Your Cart' : step === 'success' ? 'Order Complete' : 'Secure Checkout'}
           </h2>
           <button onClick={closeCart} className="p-2 hover:bg-slate-200 rounded-full"><X className="w-5 h-5"/></button>
@@ -135,9 +253,9 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
           {step === 'checkout' && (
             <div className="bg-white p-5 rounded-xl shadow-sm border space-y-4">
               <h3 className="font-bold text-slate-900">Shipping Details</h3>
-              <input type="text" className="w-full border p-2.5 rounded-lg text-sm" value={shippingInfo.name} onChange={e => setShippingInfo({...shippingInfo, name: e.target.value})} placeholder="Full Name" />
-              <input type="text" className="w-full border p-2.5 rounded-lg text-sm" value={shippingInfo.phone} onChange={e => setShippingInfo({...shippingInfo, phone: e.target.value})} placeholder="Phone Number" />
-              <textarea rows={3} className="w-full border p-2.5 rounded-lg text-sm" value={shippingInfo.address} onChange={e => setShippingInfo({...shippingInfo, address: e.target.value})} placeholder="Delivery Address" />
+              <input type="text" className="w-full border p-2.5 rounded-lg text-sm focus:border-[#3749bb] outline-none" value={shippingInfo.name} onChange={e => setShippingInfo({...shippingInfo, name: e.target.value})} placeholder="Full Name" />
+              <input type="text" className="w-full border p-2.5 rounded-lg text-sm focus:border-[#3749bb] outline-none" value={shippingInfo.phone} onChange={e => setShippingInfo({...shippingInfo, phone: e.target.value})} placeholder="Phone Number" />
+              <textarea rows={3} className="w-full border p-2.5 rounded-lg text-sm focus:border-[#3749bb] outline-none" value={shippingInfo.address} onChange={e => setShippingInfo({...shippingInfo, address: e.target.value})} placeholder="Delivery Address" />
             </div>
           )}
 
@@ -149,11 +267,11 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
                 <div className="w-10 h-10 bg-[#e2136e] rounded-lg flex items-center justify-center text-white"><Smartphone className="w-5 h-5"/></div>
                 <div><h4 className="font-bold">bKash Mobile Banking</h4></div>
               </label>
-              {paymentMethod === 'bkash' && <div className="bg-white p-4 rounded-xl border border-[#e2136e]/20"><input type="text" placeholder="bKash Number" className="w-full border p-2.5 rounded-lg text-sm" /></div>}
+              {paymentMethod === 'bkash' && <div className="bg-white p-4 rounded-xl border border-[#e2136e]/20"><input type="text" placeholder="bKash Number" className="w-full border p-2.5 rounded-lg text-sm outline-none focus:border-[#e2136e]" /></div>}
 
-              <label className={`flex items-center gap-3 p-4 rounded-xl border cursor-pointer ${paymentMethod === 'card' ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'bg-white'}`}>
+              <label className={`flex items-center gap-3 p-4 rounded-xl border cursor-pointer ${paymentMethod === 'card' ? 'border-[#3749bb] bg-indigo-50 ring-1 ring-[#3749bb]' : 'bg-white'}`}>
                 <input type="radio" value="card" className="sr-only" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} />
-                <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white"><CreditCard className="w-5 h-5"/></div>
+                <div className="w-10 h-10 bg-[#3749bb] rounded-lg flex items-center justify-center text-white"><CreditCard className="w-5 h-5"/></div>
                 <div><h4 className="font-bold">Credit / Debit Card</h4></div>
               </label>
 
@@ -169,7 +287,7 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
             <div className="text-center mt-20 space-y-4">
               <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4"><Shield className="w-10 h-10"/></div>
               <h3 className="text-2xl font-black text-slate-900">Order Confirmed!</h3>
-              <button onClick={closeCart} className="mt-6 px-6 py-2.5 bg-indigo-600 text-white font-bold rounded-xl shadow-sm">Continue Shopping</button>
+              <button onClick={closeCart} className="mt-6 px-6 py-2.5 bg-[#3749bb] text-white font-bold rounded-xl shadow-sm hover:bg-indigo-900 transition">Continue Shopping</button>
             </div>
           )}
         </div>
@@ -180,9 +298,9 @@ function CartDrawer({ user }: { user: UserProfile | null }) {
               <span className="font-bold text-slate-500">Subtotal</span>
               <span className="font-black text-lg text-[#ef4a23]">৳{cartTotal.toLocaleString()}</span>
             </div>
-            {step === 'cart' && <button onClick={() => { user ? setStep('checkout') : alert('Please log in to checkout.') }} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold">Proceed to Checkout</button>}
-            {step === 'checkout' && <button onClick={() => setStep('payment')} className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-bold">Continue to Payment</button>}
-            {step === 'payment' && <button onClick={handleCheckout} disabled={isProcessing} className="w-full py-3.5 bg-[#ef4a23] text-white rounded-xl font-bold disabled:opacity-70">{isProcessing ? 'Processing...' : `Pay ৳${cartTotal.toLocaleString()}`}</button>}
+            {step === 'cart' && <button onClick={() => { user ? setStep('checkout') : alert('Please log in to checkout.') }} className="w-full py-3.5 bg-[#3749bb] hover:bg-indigo-900 text-white rounded-xl font-bold transition">Proceed to Checkout</button>}
+            {step === 'checkout' && <button onClick={() => setStep('payment')} className="w-full py-3.5 bg-[#3749bb] hover:bg-indigo-900 text-white rounded-xl font-bold transition">Continue to Payment</button>}
+            {step === 'payment' && <button onClick={handleCheckout} disabled={isProcessing} className="w-full py-3.5 bg-[#ef4a23] hover:bg-orange-600 text-white rounded-xl font-bold disabled:opacity-70 transition">{isProcessing ? 'Processing...' : `Pay ৳${cartTotal.toLocaleString()}`}</button>}
           </div>
         )}
       </div>
@@ -196,21 +314,21 @@ function CompareDrawer() {
   if (!isCompareOpen) return null;
 
   const handleAICompare = () => {
-    if (compareItems.length === 2) {
+    if (compareItems.length >= 2) {
       window.dispatchEvent(new CustomEvent('open-ai-compare', { detail: compareItems }));
       closeCompare();
     } else {
-      alert("Please select exactly 2 products to compare with the AI Agent.");
+      alert("Please select at least 2 products to compare with the AI Agent.");
     }
   };
 
   return (
     <div className="fixed inset-0 z-[110] flex justify-end">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={closeCompare}></div>
-      <div className="relative w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col">
+      <div className="relative w-full max-w-4xl bg-white h-full shadow-2xl flex flex-col">
         <div className="p-4 border-b flex items-center justify-between bg-slate-50">
           <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-            <Scale className="w-5 h-5 text-indigo-600"/> Product Comparison
+            <Scale className="w-5 h-5 text-[#3749bb]"/> Product Comparison <span className="text-sm font-medium text-slate-500">({compareItems.length}/4)</span>
           </h2>
           <button onClick={closeCompare} className="p-2 hover:bg-slate-200 rounded-full"><X className="w-5 h-5"/></button>
         </div>
@@ -223,9 +341,9 @@ function CompareDrawer() {
               <p className="text-sm text-slate-500">You have not chosen any products to compare.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 h-full">
+            <div className="flex gap-4 h-full overflow-x-auto pb-4 custom-scrollbar">
               {compareItems.map((product) => (
-                <div key={product.id} className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col relative overflow-hidden">
+                <div key={product.id} className="min-w-[240px] w-full sm:w-1/2 md:w-1/3 lg:w-1/4 bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col relative overflow-hidden shrink-0">
                   <button onClick={() => removeFromCompare(product.id)} className="absolute top-2 right-2 p-1.5 bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition z-10">
                     <X className="w-4 h-4" />
                   </button>
@@ -241,15 +359,16 @@ function CompareDrawer() {
                       <h4 className="text-xs font-bold text-slate-900 border-b pb-1">Key Features:</h4>
                       <ul className="text-xs text-slate-600 space-y-1">
                         {Array.isArray(product.key_features) && product.key_features.slice(0, 4).map((f, i) => (
-                          <li key={i} className="line-clamp-1 flex gap-1"><span className="text-indigo-400">•</span> {typeof f === 'string' ? f : JSON.stringify(f)}</li>
+                          <li key={i} className="line-clamp-1 flex gap-1"><span className="text-[#3749bb]">•</span> {typeof f === 'string' ? f : JSON.stringify(f)}</li>
                         ))}
                       </ul>
                     </div>
                   </div>
                 </div>
               ))}
-              {compareItems.length === 1 && (
-                <div className="bg-slate-100/50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 p-6 text-center">
+              
+              {compareItems.length < 4 && (
+                <div className="min-w-[240px] w-full sm:w-1/2 md:w-1/3 lg:w-1/4 bg-slate-100/50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 p-6 text-center shrink-0">
                   <Search className="w-8 h-8 mb-2 opacity-50" />
                   <p className="text-sm font-bold">Add another product<br/>to compare</p>
                 </div>
@@ -260,11 +379,11 @@ function CompareDrawer() {
 
         {compareItems.length > 0 && (
           <div className="p-4 border-t bg-white flex gap-3">
-            <button onClick={clearCompare} className="px-4 py-3 border font-bold text-slate-600 rounded-xl hover:bg-slate-50 transition w-1/3">Clear All</button>
+            <button onClick={clearCompare} className="px-4 py-3 border font-bold text-slate-600 rounded-xl hover:bg-slate-50 transition w-1/3 md:w-1/4">Clear All</button>
             <button 
               onClick={handleAICompare} 
-              disabled={compareItems.length !== 2}
-              className="flex-1 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition"
+              disabled={compareItems.length < 2}
+              className="flex-1 py-3 bg-gradient-to-r from-[#3749bb] to-indigo-800 hover:from-indigo-800 hover:to-indigo-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition"
             >
               <Sparkles className="w-4 h-4" /> Compare with AI Agent
             </button>
@@ -275,6 +394,9 @@ function CompareDrawer() {
   );
 }
 
+// --------------------------------------------------------------------------------
+// UPDATED AI ASSISTANT: True Mobile Responsive Slide-Up Drawer
+// --------------------------------------------------------------------------------
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<{role: 'user'|'ai', content: string}[]>([{ role: 'ai', content: 'Hi! I am your AuraTech AI. I can find the best products for you, answer technical questions, or compare items. How can I help?' }]);
@@ -286,17 +408,19 @@ const AIAssistant: React.FC = () => {
     if (messagesEndRef.current) messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // AI Compare Event Integration
   useEffect(() => {
     const handleAICompareEvent = async (e: any) => {
       const items = e.detail as Product[];
       setIsOpen(true);
-      const userPrompt = `Compare these two products and tell me which one is better: 1. ${items[0].name} (Price: ৳${items[0].cash_discount_price}) and 2. ${items[1].name} (Price: ৳${items[1].cash_discount_price})`;
+      
+      const productNames = items.map((i, idx) => `${idx + 1}. ${i.name} (Price: ৳${i.cash_discount_price || i.price})`).join(', ');
+      const userPrompt = `Compare these ${items.length} products and tell me which one is best for my needs: ${productNames}`;
       
       const contextPayload = JSON.stringify({
         comparison_data: items.map(i => ({
           name: i.name, brand: i.brand, price: i.cash_discount_price,
-          features: i.key_features, specs: i.specifications
+          features: i.key_features, specs: i.specifications,
+          variants: i.variants, description: i.description
         }))
       });
 
@@ -322,7 +446,6 @@ const AIAssistant: React.FC = () => {
 
     try {
       const history = messages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.content }] }));
-      // Clean request directly sent to backend where the master prompt lives securely
       const response = await sendSupportChatMessage(history, messageText);
       setMessages(prev => [...prev, { role: 'ai', content: response.reply }]);
     } catch {
@@ -338,25 +461,31 @@ const AIAssistant: React.FC = () => {
 
   return (
     <>
-      <button onClick={() => setIsOpen(true)} className={`fixed bottom-6 right-6 z-40 bg-indigo-600 text-white p-4 rounded-full shadow-2xl transition transform hover:scale-110 flex items-center gap-2 ${isOpen ? 'scale-0' : 'scale-100'}`}>
+      <button onClick={() => setIsOpen(true)} className={`fixed bottom-6 right-6 z-40 bg-[#3749bb] text-white p-4 rounded-full shadow-2xl transition transform hover:scale-110 flex items-center gap-2 ${isOpen ? 'scale-0' : 'scale-100'}`}>
         <Bot className="w-6 h-6" /><span className="font-bold pr-2 hidden sm:block">AI Assistant</span>
       </button>
-      <div className={`fixed bottom-6 right-6 z-50 w-[380px] bg-white rounded-2xl shadow-2xl flex flex-col transition-all duration-300 transform origin-bottom-right ${isOpen ? 'scale-100' : 'scale-0 pointer-events-none'}`} style={{ height: '550px' }}>
-        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 rounded-t-2xl flex justify-between items-center text-white"><div className="flex items-center gap-2"><Sparkles className="w-5 h-5" /><h3 className="font-bold">Aura AI Agent</h3></div><button onClick={() => setIsOpen(false)}><X className="w-5 h-5" /></button></div>
+
+      {/* MOBILE-FRIENDLY BOTTOM DRAWER CHAT INTERFACE */}
+      <div className={`fixed bottom-0 sm:bottom-6 right-0 sm:right-6 z-50 w-full sm:w-[380px] h-[85vh] sm:h-[550px] bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col transition-transform duration-300 transform origin-bottom sm:origin-bottom-right ${isOpen ? 'translate-y-0 sm:scale-100' : 'translate-y-full sm:translate-y-0 sm:scale-0 pointer-events-none'}`}>
+        
+        <div className="bg-gradient-to-r from-[#3749bb] to-indigo-800 p-4 rounded-t-2xl flex justify-between items-center text-white shrink-0">
+          <div className="flex items-center gap-2"><Sparkles className="w-5 h-5" /><h3 className="font-bold">Aura AI Agent</h3></div>
+          <button onClick={() => setIsOpen(false)} className="hover:bg-white/20 p-1 rounded-full transition"><X className="w-5 h-5" /></button>
+        </div>
+
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
           {messages.map((m, idx) => (
             <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] p-3 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white border border-slate-200 shadow-sm rounded-2xl rounded-bl-sm text-slate-800'}`}>
+              <div className={`max-w-[85%] p-3 text-sm whitespace-pre-wrap leading-relaxed ${m.role === 'user' ? 'bg-[#3749bb] text-white rounded-2xl rounded-br-sm' : 'bg-white border border-slate-200 shadow-sm rounded-2xl rounded-bl-sm text-slate-800'}`}>
                 {m.content}
               </div>
             </div>
           ))}
           
-          {/* Quick Action Chips for New Users */}
           {messages.length === 1 && !isTyping && (
             <div className="flex flex-col gap-2 mt-4">
               {quickActions.map((action, idx) => (
-                <button key={idx} onClick={() => handleSend(action)} className="text-[12px] bg-white border border-indigo-100 text-indigo-700 px-3 py-2 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-left font-semibold">
+                <button key={idx} onClick={() => handleSend(action)} className="text-[12px] bg-white border border-indigo-100 text-[#3749bb] px-3 py-2 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-left font-semibold">
                   {action}
                 </button>
               ))}
@@ -366,10 +495,12 @@ const AIAssistant: React.FC = () => {
           {isTyping && <div className="text-xs text-slate-500 font-medium flex items-center gap-1.5"><Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse"/> AI is thinking...</div>}
           <div ref={messagesEndRef} />
         </div>
-        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="p-3 border-t bg-white rounded-b-2xl flex gap-2">
-          <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about any product..." className="flex-1 bg-slate-100 px-4 py-2.5 rounded-full text-sm outline-none text-slate-900 focus:ring-1 focus:ring-indigo-500" />
-          <button type="submit" disabled={!input.trim() || isTyping} className="bg-indigo-600 text-white p-2.5 rounded-full shadow-sm disabled:opacity-50 hover:bg-indigo-700 transition"><Send className="w-4 h-4" /></button>
+        
+        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="p-3 border-t bg-white sm:rounded-b-2xl flex gap-2 shrink-0">
+          <input type="text" value={input} onChange={e => setInput(e.target.value)} placeholder="Ask about any product..." className="flex-1 bg-slate-100 px-4 py-2.5 rounded-full text-sm outline-none text-slate-900 focus:ring-1 focus:ring-[#3749bb]" />
+          <button type="submit" disabled={!input.trim() || isTyping} className="bg-[#3749bb] text-white p-2.5 rounded-full shadow-sm disabled:opacity-50 hover:bg-indigo-800 transition"><Send className="w-4 h-4" /></button>
         </form>
+
       </div>
     </>
   );
@@ -378,6 +509,7 @@ const AIAssistant: React.FC = () => {
 function CategoryNavBar() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [showAllMenu, setShowAllMenu] = useState(false);
   
   useEffect(() => { 
     let isMounted = true;
@@ -394,37 +526,74 @@ function CategoryNavBar() {
     return Array.from(new Set(matchedProds.map(p => p.brand).filter(b => Boolean(b) && String(b).trim() !== '')));
   };
 
+  const topCategories = [...categories].sort((a, b) => {
+    const aCount = products.filter(p => String(p.category) === String(a.id) || p.category_name === a.name).length;
+    const bCount = products.filter(p => String(p.category) === String(b.id) || p.category_name === b.name).length;
+    return bCount - aCount;
+  }).slice(0, 8); 
+
   return (
-    <nav className="bg-white border-b shadow-sm sticky top-20 z-40 hidden md:block">
-      <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center text-sm font-bold text-slate-800 relative z-50">
-        <Link to="/" className="hover:text-[#ef4a23] h-12 flex items-center pr-6 transition">All Products</Link>
-        {categories.map(cat => {
-          const brands = getBrands(cat);
-          return (
-            <div key={cat.id} className="group inline-block relative h-12">
-              <Link to={`/?category=${cat.slug}`} className="hover:text-[#ef4a23] transition flex items-center gap-1.5 h-full px-3">
-                <span>{cat.name}</span>
-                {brands.length > 0 && <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#ef4a23] transition" />}
-              </Link>
-              {brands.length > 0 && (
-                <ul className="absolute hidden group-hover:block top-full left-0 bg-white border-t-2 border-t-[#ef4a23] shadow-[0_10px_25px_rgba(0,0,0,0.1)] rounded-b-md w-56 z-50 py-2">
-                  {brands.map((brand, idx) => (
-                    <li key={idx} className="relative group/sub hover:bg-slate-50 transition-colors">
-                      <Link to={`/?search=${encodeURIComponent(brand)}`} className="px-4 py-2.5 text-[13px] font-semibold text-slate-700 hover:text-[#ef4a23] flex items-center justify-between">
-                        <span>{brand}</span>
-                      </Link>
-                    </li>
-                  ))}
-                  <li className="bg-slate-50 border-t border-slate-100 mt-1">
-                    <Link to={`/?category=${cat.slug}`} className="block px-4 py-2.5 text-center text-xs font-black text-[#3749bb] hover:text-[#ef4a23] transition uppercase tracking-wider">
-                      View All {cat.name}
-                    </Link>
-                  </li>
-                </ul>
-              )}
+    <nav className="bg-[#232f3e] text-white border-b border-[#131a22] shadow-sm sticky top-20 z-40 hidden md:block">
+      <div className="max-w-7xl mx-auto px-4 flex items-center h-10 text-sm font-medium relative z-50">
+        
+        <div 
+          className="h-full flex items-center relative"
+          onMouseEnter={() => setShowAllMenu(true)}
+          onMouseLeave={() => setShowAllMenu(false)}
+        >
+          <button className="flex items-center gap-1.5 hover:text-white px-2 py-1 border border-transparent hover:border-white rounded-sm transition h-8 mr-2 font-bold cursor-default">
+            <Menu className="w-5 h-5"/> All
+          </button>
+
+          {showAllMenu && (
+            <div className="absolute top-[100%] left-0 bg-white border border-slate-200 shadow-2xl rounded-b-lg w-72 max-h-[75vh] overflow-y-auto z-[60] py-2 text-slate-800 custom-scrollbar">
+              <div className="px-5 py-3 font-black text-lg text-slate-900 border-b mb-2">Shop By Category</div>
+              {categories.map(cat => (
+                <Link 
+                  key={cat.id} 
+                  to={`/?category=${cat.slug}`} 
+                  onClick={() => setShowAllMenu(false)}
+                  className="block px-5 py-2.5 hover:bg-slate-100 hover:text-[#ef4a23] transition text-sm font-semibold"
+                >
+                  {cat.name}
+                </Link>
+              ))}
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        <div className="flex-1 flex items-center h-full gap-1 relative z-50">
+           <Link to="/" className="hover:text-white px-2 py-1 border border-transparent hover:border-white rounded-sm transition whitespace-nowrap">Today's Deals</Link>
+           <Link to="/" className="hover:text-white px-2 py-1 border border-transparent hover:border-white rounded-sm transition whitespace-nowrap">Customer Service</Link>
+           {topCategories.map(cat => {
+             const brands = getBrands(cat);
+             return (
+               <div key={cat.id} className="group/nav h-full flex items-center relative">
+                 <Link to={`/?category=${cat.slug}`} className="hover:text-white px-2 py-1 border border-transparent hover:border-white rounded-sm transition whitespace-nowrap flex items-center gap-1">
+                   {cat.name}
+                   {brands.length > 0 && <ChevronDown className="w-3 h-3 opacity-70" />}
+                 </Link>
+                 {brands.length > 0 && (
+                    <ul className="absolute hidden group-hover/nav:block top-[100%] left-0 bg-white border border-slate-200 shadow-xl rounded-b-md w-48 z-[60] py-2 text-slate-800">
+                      {brands.map((brand, idx) => (
+                        <li key={idx}>
+                          <Link to={`/?search=${encodeURIComponent(brand)}`} className="block px-4 py-2 text-sm font-medium hover:bg-slate-100 hover:text-[#ef4a23] transition">
+                            {brand}
+                          </Link>
+                        </li>
+                      ))}
+                      <li className="bg-slate-50 border-t border-slate-100 mt-1">
+                        <Link to={`/?category=${cat.slug}`} className="block px-4 py-2.5 text-center text-xs font-black text-[#3749bb] hover:text-[#ef4a23] transition uppercase tracking-wider">
+                          View All {cat.name}
+                        </Link>
+                      </li>
+                    </ul>
+                 )}
+               </div>
+             );
+           })}
+        </div>
+
       </div>
     </nav>
   );
@@ -620,7 +789,7 @@ export function App() {
       <CartProvider>
         <CompareProvider>
           <Router>
-            <div className="min-h-screen bg-[#f2f4f8] text-slate-900 flex flex-col relative">
+            <div className="min-h-screen bg-[#f2f4f8] text-slate-900 flex flex-col relative overflow-x-hidden">
               <NavigationHeader user={user} onLogout={() => { logoutUser().then(() => window.location.href = '/'); }} onOpenAuth={() => setIsAuthOpen(true)} />
               <CategoryNavBar />
               
@@ -629,7 +798,7 @@ export function App() {
               <CompareDrawer />
               <AIAssistant />
 
-              <main className="flex-1">
+              <main className="flex-1 flex flex-col">
                 <Routes>
                   <Route path="/" element={<StorePage onProductSelect={(p) => window.location.href = `/product/${p.id}/${slugify(p.name)}`} />} />
                   <Route path="/product/:id" element={<ProductDetailPageWrapper />} />
