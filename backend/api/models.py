@@ -22,7 +22,7 @@ class Product(models.Model):
     image = models.ImageField(upload_to='products/', blank=True, null=True)
     image_url = models.URLField(max_length=500, blank=True, null=True)
     
-    # NEW: Amazon-style Features
+    # Amazon-style Features
     image_gallery = models.JSONField(default=list, blank=True)
     variants = models.JSONField(default=list, blank=True)
     
@@ -97,7 +97,13 @@ class CustomerProfile(models.Model):
 
 class Banner(models.Model):
     title = models.CharField(max_length=100)
-    image_url = models.URLField(max_length=500)
+    
+    # NEW: Allows uploading images directly to your server's media folder
+    image = models.ImageField(upload_to='banners/', null=True, blank=True)
+    
+    # UPDATED: Made optional so it doesn't crash if a local file is uploaded instead
+    image_url = models.URLField(max_length=500, blank=True, null=True)
+    
     link = models.CharField(max_length=255, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

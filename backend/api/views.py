@@ -52,6 +52,7 @@ For every shopping request:
 ==================================================
 The connected website database is the primary and authoritative source for product information.
 Never invent or assume product information. NEVER invent a product, specification, guess a price, or assume availability.
+If a user asks for a category (like smartphones) and none are in the provided context, politely inform them that you only see the items currently listed in the store inventory context.
 
 ==================================================
 3. SINGLE PRODUCT DETAILS FORMAT
@@ -68,7 +69,6 @@ If the customer asks for details about a SPECIFIC product, structure your respon
 * **Important Specifications:**
   - [Spec 1: Value]
   - [Spec 2: Value]
-* **Available Variations:** [e.g., Colors, Sizes, etc.]
 * **Summary:** [1-2 sentences summarizing the description]
 
 ==================================================
@@ -89,13 +89,7 @@ Structure your comparison cleanly using Markdown:
 
 **Final Verdict:**
 Declare a clear overall winner based on the most common use cases, or declare specific winners for specific needs.
-
-==================================================
-5. ABSOLUTE RULES
-==================================================
-DATABASE DATA > ASSUMPTIONS
-NO INVENTED DATA. NO INVENTED PRICES. NO INVENTED AVAILABILITY. NO INVENTED FEATURES.
-Your job is to make the customer's purchasing decision easier, faster, and more confident."""
+"""
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
@@ -194,6 +188,11 @@ class BannerViewSet(viewsets.ModelViewSet):
     queryset = Banner.objects.all().order_by('-created_at')
     serializer_class = BannerSerializer
     
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context.update({"request": self.request})
+        return context
+
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             return [IsAdminUser()]
@@ -587,55 +586,57 @@ def ai_customer_support_view(request):
         return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
 
     # -------------------------------------------------------------------------
-    # FIXED LOGIC: ADVANCED EXACT MATCH & INTERSECTION SEARCH
+    # FIXED LOGIC: Advanced Matching & Dedicated Comparison Pipeline
     # -------------------------------------------------------------------------
-    if not product_context:
+    final_context = ""
+    
+    if product_context and "comparison_data" in product_context:
+        # User is using the AI Compare Tool
+        final_context = f"Explicit Product Comparison Data provided by the system:\n{product_context}"
+    else:
+        # Standard Store Search
         search_str = message.strip()
-        
-        # Priority 1: Exact Name Match
         products = Product.objects.filter(name__iexact=search_str).select_related('category')
         
-        # Priority 2: Very close Name match
         if not products.exists():
-            products = Product.objects.filter(name__icontains=search_str).select_related('category')[:30]
-            
-        # Priority 3: Smart Keyword Intersection (AND logic)
-        if not products.exists():
-            ignore_words = {'the', 'and', 'for', 'with', 'this', 'that', 'about', 'what', 'how', 'product', 'detail', 'details', 'tell', 'help', 'price', 'sizes', 'size'}
+            # Stripped out nouns (smartphone, laptop) from ignore_words so the database can actually search for them!
+            ignore_words = {'the', 'and', 'for', 'with', 'this', 'that', 'about', 'what', 'how', 'tell', 'help', 'price', 'choose', 'find', 'show', 'suggest', 'recommend', 'give', 'looking', 'want', 'need', 'best', 'good', 'cheap', 'budget', 'under', 'over', 'between', 'can', 'you', 'please', 'me', 'some', 'any', 'available', 'stock', 'store', 'compare', 'difference'}
             raw_words = re.findall(r'\b\w+\b', message.lower())
             search_terms = [w for w in raw_words if len(w) > 2 and w not in ignore_words]
             
             if search_terms:
                 q_objects = Q()
-                # Use AND logic for up to 4 significant terms to ensure precise matching
-                for term in search_terms[:4]:
-                    q_objects &= (Q(name__icontains=term) | Q(brand__icontains=term) | Q(category__name__icontains=term))
-                products = Product.objects.filter(q_objects).select_related('category').distinct()[:30]
+                for term in search_terms[:5]:
+                    search_val = term
+                    # Map conversational words directly to DB keywords
+                    if term in ['phone', 'phones', 'mobiles']: search_val = 'smartphone'
+                    elif term == 'laptops': search_val = 'laptop'
+                    elif term in ['earbuds', 'earphones', 'tws']: search_val = 'headphone'
+                    
+                    q_objects |= Q(name__icontains=search_val) | Q(brand__icontains=search_val) | Q(category__name__icontains=search_val) | Q(description__icontains=search_val)
+                
+                products = Product.objects.filter(q_objects).select_related('category').distinct()[:25]
         
-        # Priority 4: Generic OR Fallback
         if not products.exists():
-            if 'search_terms' in locals() and search_terms:
-                q_objects = Q()
-                for term in search_terms[:3]:
-                    q_objects |= Q(name__icontains=term)
-                products = Product.objects.filter(q_objects).select_related('category').distinct()[:30]
-            else:
-                products = Product.objects.all().select_related('category').order_by('-id')[:30]
+            # CRITICAL FALLBACK: If the user search doesn't match anything perfectly,
+            # send a broad, diverse sample of the catalog so the AI knows what IS in the store!
+            products = Product.objects.all().select_related('category').order_by('?')[:20]
 
-        # Compile the perfectly matched products into context
         product_list_strs = []
         for p in products:
             cat_name = p.category.name if p.category else "Uncategorized"
-            brand = p.brand if p.brand else "N/A"
+            brand = p.brand if p.brand else "AuraTech"
             price = p.cash_discount_price if p.cash_discount_price else p.regular_price 
             
             product_list_strs.append(
-                f"[ID: {p.id}] Name: {p.name} | Category: {cat_name} | Brand: {brand} | Price: ৳{price} | "
-                f"Stock: {p.stock} | Variations: {p.variants} | Features: {p.key_features} | Specs: {p.specifications}"
+                f"[ID: {p.id}] {p.name} | Cat: {cat_name} | Brand: {brand} | ৳{price} | Stock: {p.stock}\n"
+                f"Features: {p.key_features}\nSpecs: {p.specifications}"
             )
-        product_context = "Available Products in Database:\n" + "\n".join(product_list_strs)
-    else:
-        product_context = "Explicit Product Comparison Data:\n" + str(product_context)
+        
+        final_context = "Available Store Inventory Context:\n" + "\n".join(product_list_strs)
+        
+        if product_context:
+            final_context += f"\n\nAdditionally, the user is currently viewing this item:\n{product_context}"
 
     try:
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -656,13 +657,14 @@ def ai_customer_support_view(request):
             history=gemini_history
         )
 
-        full_message = f"PRODUCT DATABASE CONTEXT:\n{product_context}\n\nUSER REQUEST: {message}"
+        full_message = f"DATABASE CONTEXT:\n{final_context}\n\nUSER REQUEST: {message}"
         response = chat.send_message(full_message)
         return Response({"reply": response.text})
 
     except Exception as e:
         print("AI Agent Error:", e)
-        return Response({"error": "AI Support currently unavailable."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Graceful degradation: Return 200 OK so the frontend chat doesn't crash on API Limits
+        return Response({"reply": "I am experiencing a momentary server delay and cannot process your request right now. Please try again in a few seconds."}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])

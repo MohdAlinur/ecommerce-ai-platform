@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Send, X, User } from 'lucide-react';
+import { Bot, Send, X, Sparkles } from 'lucide-react';
 import { sendSupportChatMessage } from '../api';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product } from '../types';
@@ -28,9 +28,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ isOpen, onClose, curre
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,93 +59,71 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ isOpen, onClose, curre
       const res = await sendSupportChatMessage(updatedHistory, userMsg, productContext);
       setMessages((prev) => [...prev, { sender: 'model', text: res.reply }]);
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        { sender: 'model', text: 'Sorry, I encountered an issue reaching the server. Please try again.' },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+      setMessages((prev) => [...prev, { sender: 'model', text: 'Sorry, I encountered an issue reaching the server. Please try again.' }]);
+    } finally { setLoading(false); }
   };
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.95, opacity: 0 }}
-            className="w-full max-w-xl bg-white rounded-2xl shadow-2xl flex flex-col h-[600px] overflow-hidden border border-slate-200"
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl flex flex-col h-[650px] overflow-hidden border border-slate-100"
           >
-            {/* Header */}
-            <div className="p-4 bg-gradient-to-r from-purple-600 to-indigo-600 text-white flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Bot className="w-6 h-6" />
+            <div className="p-6 bg-slate-900 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-indigo-500/20 rounded-xl flex items-center justify-center border border-indigo-500/30">
+                  <Sparkles className="w-5 h-5 text-indigo-400" />
+                </div>
                 <div>
-                  <h3 className="font-bold leading-tight">AI Support Agent</h3>
-                  <span className="text-xs text-purple-200">
-                    {currentProduct ? `Context: ${currentProduct.name}` : 'Powered by Gemini 2.5 Flash'}
+                  <h3 className="font-black text-white text-lg tracking-tight leading-tight">Aura AI Agent</h3>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">
+                    {currentProduct ? `Context: ${currentProduct.name.substring(0,25)}...` : 'Powered by Gemini'}
                   </span>
                 </div>
               </div>
-              <button onClick={onClose} className="p-1.5 hover:bg-white/20 rounded-lg">
+              <button onClick={onClose} className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/50">
               {messages.map((m, idx) => (
-                <div
-                  key={idx}
-                  className={`flex items-start space-x-2 ${
-                    m.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''
-                  }`}
-                >
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
-                      m.sender === 'user' ? 'bg-indigo-600 text-white' : 'bg-purple-600 text-white'
-                    }`}
-                  >
-                    {m.sender === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                <div key={idx} className={`flex items-start space-x-3 ${m.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 border ${m.sender === 'user' ? 'bg-slate-200 border-slate-300' : 'bg-indigo-100 border-indigo-200 text-indigo-600'}`}>
+                    {m.sender === 'user' ? <span className="text-xs font-bold text-slate-600">ME</span> : <Bot className="w-4 h-4" />}
                   </div>
-                  <div
-                    className={`max-w-[75%] p-3.5 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                      m.sender === 'user'
-                        ? 'bg-indigo-600 text-white rounded-tr-none'
-                        : 'bg-white text-slate-800 border border-slate-200 rounded-tl-none whitespace-pre-wrap'
-                    }`}
-                  >
+                  <div className={`max-w-[80%] p-4 text-sm leading-relaxed shadow-sm break-words ${m.sender === 'user' ? 'bg-slate-900 text-white rounded-2xl rounded-tr-sm' : 'bg-white text-slate-700 border border-slate-100 rounded-2xl rounded-tl-sm whitespace-pre-wrap'}`}>
                     {m.text}
                   </div>
                 </div>
               ))}
               {loading && (
-                <div className="flex items-center space-x-2 text-slate-400 text-xs">
-                  <div className="w-2 h-2 rounded-full bg-purple-500 animate-bounce" />
-                  <div className="w-2 h-2 rounded-full bg-purple-500 animate-bounce delay-100" />
-                  <div className="w-2 h-2 rounded-full bg-purple-500 animate-bounce delay-200" />
-                  <span>Agent is analyzing specifications...</span>
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 rounded-full bg-indigo-100 border border-indigo-200 flex items-center justify-center"><Bot className="w-4 h-4 text-indigo-600" /></div>
+                  <div className="bg-white border border-slate-100 p-4 rounded-2xl rounded-tl-sm flex space-x-1.5 shadow-sm">
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" />
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce delay-100" />
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce delay-200" />
+                  </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Form */}
-            <form onSubmit={handleSend} className="p-3 bg-white border-t border-slate-200 flex items-center space-x-2">
+            <form onSubmit={handleSend} className="p-4 bg-white border-t border-slate-100 flex items-center gap-3 shrink-0">
               <input
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={currentProduct ? `Ask anything about ${currentProduct.name}...` : "Ask about products, orders, returns..."}
-                className="flex-1 p-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-indigo-500"
+                placeholder={currentProduct ? `Ask anything about this ${currentProduct.brand}...` : "Ask about specs, recommendations..."}
+                className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:border-slate-900 focus:bg-white transition"
               />
-              <button
-                type="submit"
-                disabled={loading || !input.trim()}
-                className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition disabled:opacity-50 shadow-sm"
-              >
+              <button type="submit" disabled={loading || !input.trim()} className="p-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl transition disabled:opacity-50 shadow-sm flex items-center justify-center">
                 <Send className="w-5 h-5" />
               </button>
             </form>

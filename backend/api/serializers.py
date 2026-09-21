@@ -3,7 +3,6 @@ from django.utils.text import slugify
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 
-# Assuming Banner and DiscountCode were added to your models.py
 from .models import Category, Product, Review, Order, OrderItem, CustomerProfile, Banner, DiscountCode
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -125,9 +124,22 @@ class UserSerializer(serializers.ModelSerializer):
 # ENTERPRISE MODULES: CMS & MARKETING
 # ==========================================
 class BannerSerializer(serializers.ModelSerializer):
+    image_display_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Banner
         fields = '__all__'
+
+    def get_image_display_url(self, obj):
+        request = self.context.get('request')
+        if obj.image:
+            url = obj.image.url
+            if request:
+                return request.build_absolute_uri(url)
+            return f"http://127.0.0.1:8000{url}"
+        if obj.image_url:
+            return obj.image_url
+        return None
 
 class DiscountCodeSerializer(serializers.ModelSerializer):
     class Meta:
