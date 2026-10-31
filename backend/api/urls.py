@@ -4,7 +4,7 @@ from .views import (
     CategoryViewSet, ProductViewSet, ReviewViewSet, OrderViewSet, BannerViewSet, DiscountCodeViewSet,
     signup_view, login_view, logout_view, user_profile_view,
     admin_list_users, admin_delete_user, admin_create_admin_view,
-    admin_bulk_import_csv_view, admin_bulk_delete_products_view, # <-- Added bulk delete
+    admin_bulk_import_csv_view, admin_bulk_delete_products_view,
     analyze_product_ai_view, ai_customer_support_view, admin_analytics_view,
     google_login_view 
 )
@@ -30,7 +30,7 @@ urlpatterns = [
     path('admin/users/<int:user_id>/', admin_delete_user, name='admin-delete-user'),
     
     path('admin/products/bulk-csv/', admin_bulk_import_csv_view, name='admin-bulk-csv'),
-    path('admin/products/bulk-delete/', admin_bulk_delete_products_view, name='admin-bulk-delete'), # <-- Added route
+    path('admin/products/bulk-delete/', admin_bulk_delete_products_view, name='admin-bulk-delete'),
     
     path('products/<int:product_id>/analyze-ai/', analyze_product_ai_view, name='analyze-product-ai'),
     path('chat/support/', ai_customer_support_view, name='ai-customer-support'),

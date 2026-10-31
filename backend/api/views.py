@@ -5,8 +5,10 @@ import json
 import re
 import urllib.request
 from decimal import Decimal
+
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.db.models import Sum, Count, Avg, Q
 from django.utils import timezone
 from django.utils.text import slugify
@@ -24,14 +26,8 @@ from .models import Category, Product, Review, Order, OrderItem, CustomerProfile
 from .serializers import CategorySerializer, ProductSerializer, ReviewSerializer, OrderSerializer, UserSerializer, BannerSerializer, DiscountCodeSerializer
 from .ai_services import analyze_product_reviews_ai
 
-# ==================================================
-# UNLOCK CSV LIMITS FOR MASSIVE AMAZON DATASETS
-# ==================================================
 csv.field_size_limit(2147483647)
 
-# ==================================================
-# MASTER AI SHOPPING AGENT SYSTEM PROMPT
-# ==================================================
 SHOPPING_AGENT_PROMPT = """You are an expert AI Personal Shopping Assistant for the AuraTech e-commerce platform.
 Your primary goal is to help customers find the most suitable product from the products available in the website's database.
 You are an unbiased product-matching and decision-support agent.
@@ -101,8 +97,9 @@ class CategoryViewSet(viewsets.ModelViewSet):
         return [AllowAny()]
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.all().order_by('-id')
+    queryset = Product.objects.select_related('category').all().order_by('-id')
     serializer_class = ProductSerializer
+    pagination_class = None 
 
     def get_permissions(self):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
@@ -113,14 +110,21 @@ class ProductViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         category = self.request.query_params.get('category')
         search = self.request.query_params.get('search')
+        
         if category:
             qs = qs.filter(category__name__iexact=category) | qs.filter(category__slug__iexact=category)
         if search:
             qs = qs.filter(name__icontains=search) | qs.filter(brand__icontains=search)
+        
+        # THE FIX: Only slice the queryset when the frontend requests the entire list grid.
+        # This prevents the 404 error when looking up a specific product ID outside the top 200.
+        if self.action == 'list':
+            return qs[:200]
+            
         return qs
 
 class ReviewViewSet(viewsets.ModelViewSet):
-    queryset = Review.objects.all().order_by('-created_at')
+    queryset = Review.objects.select_related('product').all().order_by('-created_at')
     serializer_class = ReviewSerializer
 
     def get_permissions(self):
@@ -135,13 +139,13 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         if self.request.user.is_staff:
-            return Order.objects.all().order_by('-created_at')
-        return Order.objects.filter(customer_email=self.request.user.email).order_by('-created_at')
+            return Order.objects.prefetch_related('items__product').all().order_by('-created_at')
+        return Order.objects.prefetch_related('items__product').filter(customer_email=self.request.user.email).order_by('-created_at')
 
+    @transaction.atomic
     def create(self, request, *args, **kwargs):
         data = request.data
         items_data = data.get('items', [])
-        
         shipping_data = data.get('shipping', {})
         payment_method = data.get('payment_method', 'cod')
         
@@ -153,7 +157,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         for item in items_data:
             try:
-                product = Product.objects.get(id=item['product_id'])
+                product = Product.objects.select_for_update().get(id=item['product_id'])
             except Product.DoesNotExist:
                 return Response({"error": f"Product not found"}, status=status.HTTP_404_NOT_FOUND)
                 
@@ -172,8 +176,9 @@ class OrderViewSet(viewsets.ModelViewSet):
             shipping_address=shipping_data.get('address', ''),
             phone=shipping_data.get('phone', ''),
             payment_method=payment_method,
+            payment_status='PAID' if payment_method != 'cod' else 'UNPAID', 
             total_amount=total,
-            status='COMPLETED'
+            status='PENDING'
         )
 
         for product, qty, price in order_items_to_create:
@@ -585,21 +590,15 @@ def ai_customer_support_view(request):
     if not message.strip():
         return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # -------------------------------------------------------------------------
-    # FIXED LOGIC: Advanced Matching & Dedicated Comparison Pipeline
-    # -------------------------------------------------------------------------
     final_context = ""
     
     if product_context and "comparison_data" in product_context:
-        # User is using the AI Compare Tool
         final_context = f"Explicit Product Comparison Data provided by the system:\n{product_context}"
     else:
-        # Standard Store Search
         search_str = message.strip()
         products = Product.objects.filter(name__iexact=search_str).select_related('category')
         
         if not products.exists():
-            # Stripped out nouns (smartphone, laptop) from ignore_words so the database can actually search for them!
             ignore_words = {'the', 'and', 'for', 'with', 'this', 'that', 'about', 'what', 'how', 'tell', 'help', 'price', 'choose', 'find', 'show', 'suggest', 'recommend', 'give', 'looking', 'want', 'need', 'best', 'good', 'cheap', 'budget', 'under', 'over', 'between', 'can', 'you', 'please', 'me', 'some', 'any', 'available', 'stock', 'store', 'compare', 'difference'}
             raw_words = re.findall(r'\b\w+\b', message.lower())
             search_terms = [w for w in raw_words if len(w) > 2 and w not in ignore_words]
@@ -608,7 +607,6 @@ def ai_customer_support_view(request):
                 q_objects = Q()
                 for term in search_terms[:5]:
                     search_val = term
-                    # Map conversational words directly to DB keywords
                     if term in ['phone', 'phones', 'mobiles']: search_val = 'smartphone'
                     elif term == 'laptops': search_val = 'laptop'
                     elif term in ['earbuds', 'earphones', 'tws']: search_val = 'headphone'
@@ -618,8 +616,6 @@ def ai_customer_support_view(request):
                 products = Product.objects.filter(q_objects).select_related('category').distinct()[:25]
         
         if not products.exists():
-            # CRITICAL FALLBACK: If the user search doesn't match anything perfectly,
-            # send a broad, diverse sample of the catalog so the AI knows what IS in the store!
             products = Product.objects.all().select_related('category').order_by('?')[:20]
 
         product_list_strs = []
@@ -650,7 +646,7 @@ def ai_customer_support_view(request):
             )
 
         chat = client.chats.create(
-            model='gemini-3.6-flash', 
+            model='gemini-2.5-flash', 
             config=types.GenerateContentConfig(
                 system_instruction=SHOPPING_AGENT_PROMPT,
             ),
@@ -663,13 +659,12 @@ def ai_customer_support_view(request):
 
     except Exception as e:
         print("AI Agent Error:", e)
-        # Graceful degradation: Return 200 OK so the frontend chat doesn't crash on API Limits
         return Response({"reply": "I am experiencing a momentary server delay and cannot process your request right now. Please try again in a few seconds."}, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def admin_analytics_view(request):
-    total_revenue = Order.objects.filter(status='COMPLETED').aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
+    total_revenue = Order.objects.filter(status__in=['COMPLETED', 'DELIVERED']).aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
     total_orders = Order.objects.count()
     total_products = Product.objects.count()
     avg_rating = Review.objects.aggregate(avg=Avg('rating'))['avg'] or 0.0
@@ -679,7 +674,7 @@ def admin_analytics_view(request):
     for i in range(6, -1, -1):
         day = today - timedelta(days=i)
         day_total = Order.objects.filter(
-            status='COMPLETED', 
+            status__in=['COMPLETED', 'DELIVERED'], 
             created_at__date=day
         ).aggregate(total=Sum('total_amount'))['total'] or 0
         sales_trend.append({
@@ -689,12 +684,15 @@ def admin_analytics_view(request):
 
     category_distribution = list(Category.objects.annotate(count=Count('products')).values('name', 'count'))
 
+    low_stock_count = Product.objects.filter(stock__lt=5).count()
+
     return Response({
         "metrics": {
             "total_revenue": float(total_revenue),
             "total_orders": total_orders,
             "total_products": total_products,
-            "average_rating": round(avg_rating, 1)
+            "average_rating": round(avg_rating, 1),
+            "low_stock_alerts": low_stock_count
         },
         "sales_trend": sales_trend,
         "category_distribution": category_distribution

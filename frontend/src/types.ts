@@ -1,9 +1,11 @@
 export interface Review {
   id?: number;
   product: number;
+  product_name?: string;
   user_name: string;
   rating: number;
   comment: string;
+  is_approved?: boolean;
   created_at?: string;
 }
 
@@ -20,10 +22,16 @@ export interface SpecGroup {
   features?: SpecAttribute[];
 }
 
+export interface ProductVariant {
+  name: string;
+  options: string[];
+}
+
 export interface Product {
   id: number;
   category: number;
   category_name?: string;
+  category_slug?: string;
   name: string;
   brand?: string;
   product_code?: string;
@@ -32,12 +40,16 @@ export interface Product {
   regular_price?: string | number;
   price?: string | number;
   stock: number;
+  image?: string;
   image_url?: string;
   image_display_url?: string;
+  image_gallery?: string[];
+  variants?: ProductVariant[];
   key_features?: string[];
   specifications?: SpecGroup[];
   reviews?: Review[];
   average_rating?: number;
+  created_at?: string;
 }
 
 export interface Category {
@@ -49,7 +61,13 @@ export interface Category {
 export interface UserProfile {
   id: number;
   username: string;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
   email?: string;
+  phone?: string;
+  shipping_address?: string;
+  avatar_url?: string | null;
   is_staff: boolean;
   is_superuser: boolean;
 }
@@ -57,6 +75,7 @@ export interface UserProfile {
 export interface CartItem {
   product: Product;
   quantity: number;
+  selectedVariants?: Record<string, string>;
 }
 
 export interface AIReviewAnalysis {
@@ -72,7 +91,9 @@ export interface AnalyticsData {
   metrics: {
     total_revenue: number;
     total_orders: number;
+    pending_orders?: number;
     total_products: number;
+    low_stock_products?: number;
     average_rating: number;
   };
   sales_trend: { date: string; revenue: number }[];

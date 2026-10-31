@@ -1,14 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import type { Product } from '../types';
-
-interface CartItem {
-  product: Product;
-  quantity: number;
-}
+import type { Product, CartItem } from '../types';
 
 interface CartContextType {
   cartItems: CartItem[];
-  addToCart: (product: Product, quantity?: number) => void;
+  totalItems: number;
+  addToCart: (product: Product, quantity?: number, selectedVariants?: Record<string, string>) => void;
   removeFromCart: (productId: number) => void;
   updateQuantity: (productId: number, quantity: number) => void;
   clearCart: () => void;
@@ -24,20 +20,26 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const saved = localStorage.getItem('aurastore_cart');
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('aurastore_cart', JSON.stringify(cartItems));
   }, [cartItems]);
 
-  const addToCart = (product: Product, quantity: number = 1) => {
+  const totalItems = cartItems.reduce((acc, item) => acc + item.quantity, 0);
+
+  const addToCart = (product: Product, quantity: number = 1, selectedVariants?: Record<string, string>) => {
     setCartItems(prev => {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
-        return prev.map(item => item.product.id === product.id ? { ...item, quantity: item.quantity + quantity } : item);
+        return prev.map(item =>
+          item.product.id === product.id
+            ? { ...item, quantity: item.quantity + quantity, selectedVariants: selectedVariants || item.selectedVariants }
+            : item
+        );
       }
-      return [...prev, { product, quantity }];
+      return [...prev, { product, quantity, selectedVariants }];
     });
   };
 
@@ -55,7 +57,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const closeCart = () => setIsCartOpen(false);
 
   return (
-    <CartContext.Provider value={{ cartItems, addToCart, removeFromCart, updateQuantity, clearCart, isCartOpen, openCart, closeCart }}>
+    <CartContext.Provider value={{ cartItems, totalItems, addToCart, removeFromCart, updateQuantity, clearCart, isCartOpen, openCart, closeCart }}>
       {children}
     </CartContext.Provider>
   );

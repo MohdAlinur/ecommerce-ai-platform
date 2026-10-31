@@ -1,3 +1,4 @@
+# models.py
 from django.db import models
 from django.contrib.auth.models import User
 
@@ -60,12 +61,24 @@ class Order(models.Model):
         ('card', 'Credit/Debit Card'),
         ('cod', 'Cash on Delivery'),
     ]
+
+    # NEW FEATURE: Dedicated payment status tracker for gateways
+    PAYMENT_STATUS = [
+        ('UNPAID', 'Unpaid'),
+        ('PROCESSING', 'Processing'),
+        ('PAID', 'Paid'),
+        ('FAILED', 'Failed'),
+    ]
     
     customer_name = models.CharField(max_length=150)
     customer_email = models.EmailField()
     phone = models.CharField(max_length=20, blank=True, null=True)
     shipping_address = models.TextField(blank=True, null=True)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default='cod')
+    
+    # Updated to track actual gateway status
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='UNPAID')
+    transaction_id = models.CharField(max_length=100, blank=True, null=True)
     
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
@@ -91,19 +104,17 @@ class CustomerProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer_profile')
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
     phone_number = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    
+    # NEW FEATURE: Standardized address book for professional UX
+    default_shipping_address = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.username}'s Profile"
 
 class Banner(models.Model):
     title = models.CharField(max_length=100)
-    
-    # NEW: Allows uploading images directly to your server's media folder
     image = models.ImageField(upload_to='banners/', null=True, blank=True)
-    
-    # UPDATED: Made optional so it doesn't crash if a local file is uploaded instead
     image_url = models.URLField(max_length=500, blank=True, null=True)
-    
     link = models.CharField(max_length=255, blank=True, null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

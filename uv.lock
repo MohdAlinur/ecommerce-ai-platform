@@ -1,0 +1,19 @@
+version = 1
+revision = 3
+requires-python = ">=3.14"
+
+[manifest]
+members = [
+    "ecommerce-ai-platform",
+    "frontend",
+]
+
+[[package]]
+name = "ecommerce-ai-platform"
+version = "0.1.0"
+source = { virtual = "." }
+
+[[package]]
+name = "frontend"
+version = "0.1.0"
+source = { virtual = "frontend" }

@@ -42,7 +42,6 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_image_display_url(self, obj):
         request = self.context.get('request')
         if obj.image:
-            # Safely returns the absolute URL if the request context is provided
             return request.build_absolute_uri(obj.image.url) if request else obj.image.url
         elif obj.image_url:
             return obj.image_url
@@ -62,7 +61,7 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             'id', 'customer_name', 'customer_email', 'phone', 
-            'shipping_address', 'payment_method', 'total_amount', 
+            'shipping_address', 'payment_method', 'payment_status', 'total_amount', 
             'status', 'tracking_number', 'courier_name', 'created_at', 'items'
         ]
 
@@ -71,10 +70,11 @@ class UserSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
     name = serializers.SerializerMethodField()
+    default_shipping_address = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'is_staff', 'is_superuser', 'avatar_url', 'phone', 'name']
+        fields = ['id', 'username', 'email', 'password', 'is_staff', 'is_superuser', 'avatar_url', 'phone', 'name', 'default_shipping_address']
 
     def get_avatar_url(self, obj):
         try:
@@ -94,6 +94,15 @@ class UserSerializer(serializers.ModelSerializer):
         except ObjectDoesNotExist:
             return None
         return None
+
+    def get_default_shipping_address(self, obj):
+        try:
+            profile = obj.customer_profile
+            if profile:
+                return profile.default_shipping_address
+        except ObjectDoesNotExist:
+            return None
+        return None
         
     def get_name(self, obj):
         return f"{obj.first_name} {obj.last_name}".strip() or obj.username
@@ -109,11 +118,9 @@ class UserSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
         
-        # Update standard fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
             
-        # Safely hash the new password if provided during an update
         if password:
             instance.set_password(password)
             

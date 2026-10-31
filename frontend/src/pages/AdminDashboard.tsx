@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { 
   LayoutDashboard, Package, ShoppingCart, Users, Tag, Image as ImageIcon, 
-  Plus, Trash2, Edit2, Shield, CheckCircle, Truck, X, Upload, Download, Layers, Info, ListTree, ImagePlus, Box
+  Plus, Trash2, Edit2, Shield, CheckCircle, Truck, X, Upload, Download, Layers, Info, ListTree, ImagePlus, Box, AlertTriangle
 } from 'lucide-react';
 import type { AnalyticsData, Category, Product, UserProfile } from '../types';
 import api, { 
@@ -15,7 +15,7 @@ export const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [data, setData] = useState<any | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -186,8 +186,13 @@ export const AdminDashboard: React.FC = () => {
     } catch { alert('Failed to import CSV file. Ensure columns match exactly.'); }
   };
 
-  const handleUpdateOrderStatus = async (orderId: number, status: string, tracking?: string, courier?: string) => {
-    try { await api.patch(`/orders/${orderId}/`, { status, tracking_number: tracking, courier_name: courier }); loadAdminData(); } catch { alert('Failed to update order status'); }
+  const handleUpdateOrderStatus = async (orderId: number, status: string, paymentStatus?: string, tracking?: string, courier?: string) => {
+    try { 
+      const payload: any = { status, tracking_number: tracking, courier_name: courier };
+      if (paymentStatus) payload.payment_status = paymentStatus;
+      await api.patch(`/orders/${orderId}/`, payload); 
+      loadAdminData(); 
+    } catch { alert('Failed to update order status'); }
   };
 
   const handleCreateDiscount = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -330,40 +335,50 @@ export const AdminDashboard: React.FC = () => {
         </header>
 
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><h3 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">৳{data?.metrics.total_revenue.toLocaleString()}</h3><p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase mt-2 tracking-widest">Total Revenue</p></div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><h3 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{data?.metrics.total_orders}</h3><p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase mt-2 tracking-widest">Total Orders</p></div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><h3 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{data?.metrics.total_products}</h3><p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase mt-2 tracking-widest">Active Products</p></div>
             <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100"><h3 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{data?.metrics.average_rating}</h3><p className="text-[10px] md:text-xs text-slate-400 font-bold uppercase mt-2 tracking-widest">Avg Store Rating</p></div>
+            <div className="bg-rose-50 p-6 rounded-3xl shadow-sm border border-rose-100"><h3 className="text-3xl md:text-4xl font-black text-rose-600 tracking-tight flex items-center gap-2">{data?.metrics.low_stock_alerts} <AlertTriangle className="w-6 h-6"/></h3><p className="text-[10px] md:text-xs text-rose-400 font-bold uppercase mt-2 tracking-widest">Low Stock Items</p></div>
           </div>
         )}
 
         {activeTab === 'orders' && (
           <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden overflow-x-auto">
-            <table className="w-full text-left text-sm min-w-[600px]">
+            <table className="w-full text-left text-sm min-w-[800px]">
               <thead className="bg-slate-50 text-slate-500 border-b border-slate-100">
-                <tr><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Order & Date</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Customer</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Total</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Status</th><th className="p-5 font-bold uppercase tracking-wider text-[10px] text-right">Action</th></tr>
+                <tr><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Order & Date</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Customer</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Total & Payment</th><th className="p-5 font-bold uppercase tracking-wider text-[10px]">Status</th><th className="p-5 font-bold uppercase tracking-wider text-[10px] text-right">Action</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {orders.map(order => (
                   <tr key={order.id} className="hover:bg-slate-50/50 transition">
                     <td className="p-5"><strong className="text-slate-900 block tracking-tight">#{order.id}</strong><span className="text-xs text-slate-400">{new Date(order.created_at).toLocaleDateString()}</span></td>
                     <td className="p-5 font-medium text-slate-700">{order.customer_name}<br/><span className="text-xs text-slate-400">{order.phone}</span></td>
-                    <td className="p-5 font-black text-slate-900 tracking-tight">৳{Number(order.total_amount).toLocaleString()}</td>
+                    <td className="p-5">
+                      <strong className="text-slate-900 block tracking-tight">৳{Number(order.total_amount).toLocaleString()}</strong>
+                      <span className={`text-[10px] font-bold uppercase tracking-widest ${order.payment_status === 'PAID' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                        {order.payment_status} ({order.payment_method})
+                      </span>
+                    </td>
                     <td className="p-5">
                       <span className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest ${order.status === 'COMPLETED' || order.status === 'DELIVERED' ? 'bg-emerald-50 text-emerald-600' : order.status === 'CANCELLED' ? 'bg-rose-50 text-rose-600' : 'bg-indigo-50 text-indigo-600'}`}>
                         {order.status}
                       </span>
                     </td>
                     <td className="p-5 text-right">
-                      {order.status === 'PENDING' && <button onClick={() => handleUpdateOrderStatus(order.id, 'PROCESSING')} className="text-xs bg-slate-900 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-slate-800 transition">Process</button>}
+                      {order.status === 'PENDING' && (
+                        <div className="flex justify-end gap-2">
+                           <button onClick={() => handleUpdateOrderStatus(order.id, 'PROCESSING', 'PAID')} className="text-xs bg-slate-900 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-slate-800 transition">Mark Paid & Process</button>
+                        </div>
+                      )}
                       {order.status === 'PROCESSING' && (
                         <div className="flex flex-col md:flex-row gap-2 justify-end">
                           <input id={`track-${order.id}`} type="text" placeholder="Tracking #" className="border border-slate-200 rounded-full px-3 py-1.5 text-xs w-full md:w-28 focus:outline-none focus:border-slate-900" />
-                          <button onClick={() => handleUpdateOrderStatus(order.id, 'SHIPPED', (document.getElementById(`track-${order.id}`) as HTMLInputElement)?.value, 'Standard')} className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-indigo-700 transition"><Truck className="w-3 h-3 inline md:hidden lg:inline mr-1"/> Ship</button>
+                          <button onClick={() => handleUpdateOrderStatus(order.id, 'SHIPPED', order.payment_status, (document.getElementById(`track-${order.id}`) as HTMLInputElement)?.value, 'Standard')} className="text-xs bg-indigo-600 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-indigo-700 transition"><Truck className="w-3 h-3 inline md:hidden lg:inline mr-1"/> Ship</button>
                         </div>
                       )}
-                      {order.status === 'SHIPPED' && <button onClick={() => handleUpdateOrderStatus(order.id, 'DELIVERED')} className="text-xs bg-emerald-500 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-emerald-600 transition">Mark Delivered</button>}
+                      {order.status === 'SHIPPED' && <button onClick={() => handleUpdateOrderStatus(order.id, 'DELIVERED', order.payment_status)} className="text-xs bg-emerald-500 text-white px-4 py-2 rounded-full font-bold shadow-sm hover:bg-emerald-600 transition">Mark Delivered</button>}
                     </td>
                   </tr>
                 ))}
@@ -659,7 +674,6 @@ export const AdminDashboard: React.FC = () => {
                             <div key={fIdx} className="flex flex-col sm:flex-row items-center gap-2">
                               <input type="text" placeholder="Key" className="w-full sm:w-1/3 border border-slate-200 p-2.5 rounded-xl text-sm bg-white outline-none focus:border-slate-900 transition" value={feat.key} onChange={e => { const updated = [...newProd.specifications]; updated[gIdx].features[fIdx].key = e.target.value; setNewProd({...newProd, specifications: updated}); }} />
                               
-                              {/* MULTI-LINE TEXTAREA FOR SPEC VALUES */}
                               <textarea rows={2} placeholder="Value (multi-line)" className="w-full flex-1 border border-slate-200 p-2.5 rounded-xl text-sm bg-white outline-none focus:border-slate-900 transition resize-y" value={feat.value} onChange={e => { const updated = [...newProd.specifications]; updated[gIdx].features[fIdx].value = e.target.value; setNewProd({...newProd, specifications: updated}); }} />
 
                               <button type="button" onClick={() => removeSpecFeature(gIdx, fIdx)} className="text-slate-400 hover:text-rose-600 p-2.5 bg-slate-50 rounded-xl hover:bg-rose-50 transition"><X className="w-4 h-4"/></button>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Trash2, ArrowRight, CheckCircle, ShoppingBag } from 'lucide-react';
+import { X, Trash2, ArrowRight, CheckCircle, ShoppingBag, AlertCircle } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { createOrder } from '../api';
 import { motion, AnimatePresence } from 'motion/react';
@@ -8,29 +8,50 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const { cartItems, removeFromCart, updateQuantity, clearCart, isCartOpen, closeCart } = useCart();
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [shippingAddress, setShippingAddress] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cod' | 'bkash' | 'card'>('cod');
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  // Fallback to internal context state if props aren't used properly in App
   const open = isOpen || isCartOpen;
-  const handleClose = () => { closeCart(); onClose?.(); };
+  const handleClose = () => { 
+    closeCart(); 
+    onClose?.(); 
+    if (orderSuccess) {
+      setOrderSuccess(false);
+      setCustomerName('');
+      setCustomerEmail('');
+      setCustomerPhone('');
+      setShippingAddress('');
+    }
+  };
   
   const totalAmount = cartItems.reduce((total, item) => total + (Number(item.product.cash_discount_price || item.product.price || 0) * item.quantity), 0);
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg('');
     if (!customerName || !customerEmail || cartItems.length === 0) return;
+    
     setIsSubmitting(true);
     try {
       await createOrder({
-        customer_name: customerName,
-        customer_email: customerEmail,
+        shipping: {
+          name: customerName,
+          address: shippingAddress,
+          phone: customerPhone
+        },
+        payment_method: paymentMethod,
         items: cartItems.map((i) => ({ product_id: i.product.id, quantity: i.quantity })),
       });
       clearCart();
       setOrderSuccess(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setErrorMsg(err.response?.data?.error || 'Failed to process checkout. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -48,7 +69,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
             className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
           />
 
-          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
+          <div className="fixed inset-y-0 right-0 max-w-full flex sm:pl-10">
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
@@ -73,7 +94,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   <h3 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Order Confirmed!</h3>
                   <p className="text-slate-500 text-base leading-relaxed mb-8">Thank you for your purchase. We've sent a receipt to <span className="font-bold text-slate-700">{customerEmail}</span>.</p>
                   <button
-                    onClick={() => { setOrderSuccess(false); handleClose(); }}
+                    onClick={handleClose}
                     className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3.5 rounded-full font-bold text-sm shadow-md transition w-full"
                   >
                     Continue Shopping
@@ -81,7 +102,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                 </div>
               ) : (
                 <>
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/50">
+                  <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/50">
                     {cartItems.length === 0 ? (
                       <div className="text-center py-20 text-slate-400 flex flex-col items-center">
                         <ShoppingBag className="w-12 h-12 mb-4 opacity-50"/>
@@ -128,13 +149,19 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   </div>
 
                   {cartItems.length > 0 && (
-                    <form onSubmit={handleCheckout} className="p-6 border-t border-slate-100 bg-white space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.04)]">
+                    <form onSubmit={handleCheckout} className="p-4 sm:p-6 border-t border-slate-100 bg-white space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.04)]">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-slate-500">Subtotal</span>
                         <span className="font-black text-2xl text-slate-900 tracking-tight">৳{totalAmount.toLocaleString()}</span>
                       </div>
 
-                      <div className="space-y-3">
+                      {errorMsg && (
+                        <div className="p-3 bg-rose-50 text-rose-600 text-xs font-bold rounded-xl flex items-center gap-2 border border-rose-100">
+                          <AlertCircle className="w-4 h-4 shrink-0"/> {errorMsg}
+                        </div>
+                      )}
+
+                      <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-1 custom-scrollbar">
                         <input
                           type="text"
                           placeholder="Full Name"
@@ -151,6 +178,35 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                           required
                           className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm focus:outline-none focus:border-slate-900 transition"
                         />
+                        <input
+                          type="tel"
+                          placeholder="Phone Number"
+                          value={customerPhone}
+                          onChange={(e) => setCustomerPhone(e.target.value)}
+                          required
+                          className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm focus:outline-none focus:border-slate-900 transition"
+                        />
+                        <textarea
+                          placeholder="Delivery Address"
+                          value={shippingAddress}
+                          onChange={(e) => setShippingAddress(e.target.value)}
+                          required
+                          rows={2}
+                          className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm focus:outline-none focus:border-slate-900 transition resize-none"
+                        />
+                        
+                        <div className="pt-2">
+                          <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Payment Method</label>
+                          <select 
+                            value={paymentMethod} 
+                            onChange={(e) => setPaymentMethod(e.target.value as any)}
+                            className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm font-bold focus:outline-none focus:border-slate-900 transition"
+                          >
+                            <option value="cod">Cash on Delivery</option>
+                            <option value="bkash">bKash Banking</option>
+                            <option value="card">Credit / Debit Card</option>
+                          </select>
+                        </div>
                       </div>
 
                       <button
@@ -158,7 +214,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                         disabled={isSubmitting}
                         className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-full font-bold flex items-center justify-center space-x-2 shadow-md transition disabled:opacity-50 mt-4"
                       >
-                        <span>{isSubmitting ? 'Processing...' : 'Secure Checkout'}</span>
+                        <span>{isSubmitting ? 'Processing Securely...' : 'Confirm & Pay'}</span>
                         <ArrowRight className="w-4 h-4" />
                       </button>
                     </form>

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Star, MapPin, Lock, ShieldCheck, RefreshCcw, Truck, Award, CheckCircle, ChevronDown, ChevronRight, User as UserIcon, Send, Scale, Bookmark } from 'lucide-react';
+import { Star, MapPin, Lock, ShieldCheck, RefreshCcw, Truck, Award, CheckCircle, ChevronDown, ChevronRight, User as UserIcon, Send, Scale, Bookmark, Search, ChevronLeft } from 'lucide-react';
 import { analyzeProductAI, fetchProducts, submitReview } from '../api';
 import type { Product } from '../types';
 import axios from 'axios';
@@ -88,8 +88,23 @@ export const ProductDetail: React.FC<ProductDetailProps> = ({ productId }) => {
     setZoomStyle({ transformOrigin: `${x}% ${y}%`, transform: 'scale(2.5)' });
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-bold text-slate-400">Loading premium details...</div>;
-  if (error || !product) return <div className="min-h-screen flex items-center justify-center font-bold text-rose-500">{error || "Product not found"}</div>;
+  if (loading) return <div className="min-h-[85vh] flex items-center justify-center font-bold text-slate-400">Loading premium details...</div>;
+  
+  // NEW FEATURE: Professional 404 Fallback UI
+  if (error || !product) return (
+    <div className="min-h-[85vh] flex flex-col items-center justify-center bg-slate-50 font-sans p-4 text-center">
+      <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center mb-6 border border-rose-100 shadow-sm">
+        <Search className="w-10 h-10 text-rose-500 opacity-80" />
+      </div>
+      <h2 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight mb-3">Product Not Found</h2>
+      <p className="text-slate-500 font-medium max-w-md mb-8 text-sm sm:text-base leading-relaxed">
+        The item you are looking for may have been removed, sold out, or is no longer available in our catalog.
+      </p>
+      <Link to="/" className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3.5 rounded-full font-bold shadow-md transition flex items-center gap-2">
+        <ChevronLeft className="w-5 h-5" /> Return to Store
+      </Link>
+    </div>
+  );
 
   const displayPrice = Number(product.cash_discount_price || product.price || 0);
   const regularPrice = Number(product.regular_price || displayPrice * 1.25);
