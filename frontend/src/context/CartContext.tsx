@@ -17,8 +17,12 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [cartItems, setCartItems] = useState<CartItem[]>(() => {
-    const saved = localStorage.getItem('aurastore_cart');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('aurastore_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -33,13 +37,14 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setCartItems(prev => {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
+        const nextQty = Math.min(product.stock || 99, existing.quantity + quantity);
         return prev.map(item =>
           item.product.id === product.id
-            ? { ...item, quantity: item.quantity + quantity, selectedVariants: selectedVariants || item.selectedVariants }
+            ? { ...item, quantity: nextQty, selectedVariants: selectedVariants || item.selectedVariants }
             : item
         );
       }
-      return [...prev, { product, quantity, selectedVariants }];
+      return [...prev, { product, quantity: Math.min(product.stock || 99, quantity), selectedVariants }];
     });
   };
 
@@ -48,8 +53,17 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateQuantity = (productId: number, quantity: number) => {
-    if (quantity < 1) return;
-    setCartItems(prev => prev.map(item => item.product.id === productId ? { ...item, quantity } : item));
+    if (quantity < 1) {
+      removeFromCart(productId);
+      return;
+    }
+    setCartItems(prev =>
+      prev.map(item =>
+        item.product.id === productId
+          ? { ...item, quantity: Math.min(item.product.stock || 99, quantity) }
+          : item
+      )
+    );
   };
 
   const clearCart = () => setCartItems([]);

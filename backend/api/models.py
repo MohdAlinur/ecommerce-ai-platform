@@ -1,6 +1,9 @@
-# models.py
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models import Count
+from django.db.models.signals import post_delete, post_save
+from django.dispatch import receiver
+
 
 class Category(models.Model):
     name = models.CharField(max_length=100, unique=True)
@@ -8,6 +11,7 @@ class Category(models.Model):
 
     def __str__(self):
         return self.name
+
 
 class Product(models.Model):
     category = models.ForeignKey(Category, related_name='products', on_delete=models.CASCADE)
@@ -18,15 +22,15 @@ class Product(models.Model):
     cash_discount_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     regular_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     stock = models.PositiveIntegerField(default=10)
-    
+    is_featured = models.BooleanField(default=False)
+
     # Primary Image
     image = models.ImageField(upload_to='products/', blank=True, null=True)
     image_url = models.URLField(max_length=500, blank=True, null=True)
-    
-    # Amazon-style Features
+
+    # Gallery, Variants & Structured Specs
     image_gallery = models.JSONField(default=list, blank=True)
     variants = models.JSONField(default=list, blank=True)
-    
     key_features = models.JSONField(default=list, blank=True)
     specifications = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -34,8 +38,32 @@ class Product(models.Model):
     def __str__(self):
         return self.name
 
+
+def cleanup_empty_categories():
+    """
+    Automatically deletes any Category that has 0 products remaining.
+    """
+    empty_cats = Category.objects.annotate(product_count=Count('products')).filter(product_count=0)
+    deleted_names = list(empty_cats.values_list('name', flat=True))
+    if deleted_names:
+        empty_cats.delete()
+    return deleted_names
+
+
+@receiver(post_delete, sender=Product)
+def auto_delete_empty_category_on_product_delete(sender, instance, **kwargs):
+    """
+    Triggered automatically whenever a Product is deleted (single or bulk).
+    If the product's category has no remaining products, delete the category.
+    """
+    if instance.category_id:
+        if not Product.objects.filter(category_id=instance.category_id).exists():
+            Category.objects.filter(id=instance.category_id).delete()
+
+
 class Review(models.Model):
     product = models.ForeignKey(Product, related_name='reviews', on_delete=models.CASCADE)
+    user = models.ForeignKey(User, related_name='reviews', on_delete=models.SET_NULL, null=True, blank=True)
     user_name = models.CharField(max_length=100)
     rating = models.PositiveSmallIntegerField(default=5)
     comment = models.TextField()
@@ -44,6 +72,7 @@ class Review(models.Model):
 
     def __str__(self):
         return f"{self.user_name} - {self.product.name}"
+
 
 class Order(models.Model):
     STATUS_CHOICES = [
@@ -55,72 +84,109 @@ class Order(models.Model):
         ('CANCELLED', 'Cancelled'),
         ('REFUNDED', 'Refunded'),
     ]
-    
+
     PAYMENT_CHOICES = [
         ('bkash', 'bKash Mobile Banking'),
+        ('nagad', 'Nagad Mobile Banking'),
         ('card', 'Credit/Debit Card'),
         ('cod', 'Cash on Delivery'),
     ]
 
-    # NEW FEATURE: Dedicated payment status tracker for gateways
     PAYMENT_STATUS = [
         ('UNPAID', 'Unpaid'),
         ('PROCESSING', 'Processing'),
         ('PAID', 'Paid'),
         ('FAILED', 'Failed'),
+        ('REFUNDED', 'Refunded'),
     ]
-    
+
+    user = models.ForeignKey(User, related_name='orders', on_delete=models.SET_NULL, null=True, blank=True)
     customer_name = models.CharField(max_length=150)
     customer_email = models.EmailField()
     phone = models.CharField(max_length=20, blank=True, null=True)
     shipping_address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True, default='Dhaka')
+    postal_code = models.CharField(max_length=20, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True, default='Bangladesh')
+    order_notes = models.TextField(blank=True, null=True)
+
+    # Payment & Transaction Details (PCI-Safe Masked Metadata)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default='cod')
-    
-    # Updated to track actual gateway status
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='UNPAID')
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
-    
+    card_holder_name = models.CharField(max_length=150, blank=True, null=True)
+    card_brand = models.CharField(max_length=50, blank=True, null=True)
+    card_last4 = models.CharField(max_length=4, blank=True, null=True)
+    card_expiry = models.CharField(max_length=10, blank=True, null=True)
+    payment_phone = models.CharField(max_length=25, blank=True, null=True)
+    bkash_trx_id = models.CharField(max_length=100, blank=True, null=True)
+    paid_at = models.DateTimeField(blank=True, null=True)
+
+    # Financial Breakdown
+    subtotal_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    discount_code = models.CharField(max_length=30, blank=True, null=True)
+    shipping_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    tax_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
     total_amount = models.DecimalField(max_digits=12, decimal_places=2)
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
-    
     tracking_number = models.CharField(max_length=100, blank=True, null=True)
     courier_name = models.CharField(max_length=100, blank=True, null=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"Order #{self.id} - {self.customer_name}"
 
+
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
-    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    # SET_NULL prevents ProtectedError when deleting products that were ordered in the past
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)
+    product_name_snapshot = models.CharField(max_length=255, blank=True, default='')
+    selected_variants = models.JSONField(default=dict, blank=True)
     quantity = models.PositiveIntegerField(default=1)
     price = models.DecimalField(max_digits=10, decimal_places=2)
-    
+
+    def save(self, *args, **kwargs):
+        if self.product and not self.product_name_snapshot:
+            self.product_name_snapshot = self.product.name
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"{self.quantity}x {self.product.name}"
+        name = self.product.name if self.product else (self.product_name_snapshot or 'Deleted Product')
+        return f"{self.quantity}x {name}"
+
 
 class CustomerProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer_profile')
     avatar = models.ImageField(upload_to='avatars/', null=True, blank=True)
     phone_number = models.CharField(max_length=20, unique=True, null=True, blank=True)
-    
-    # NEW FEATURE: Standardized address book for professional UX
     default_shipping_address = models.TextField(blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True, default='Dhaka')
+    postal_code = models.CharField(max_length=20, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True, default='Bangladesh')
 
     def __str__(self):
         return f"{self.user.username}'s Profile"
 
+
 class Banner(models.Model):
+    """
+    Retained in schema for migration safety; storefront now uses dynamic minimal layout.
+    """
     title = models.CharField(max_length=100)
     image = models.ImageField(upload_to='banners/', null=True, blank=True)
     image_url = models.URLField(max_length=500, blank=True, null=True)
     link = models.CharField(max_length=255, blank=True, null=True)
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return self.title
+
 
 class DiscountCode(models.Model):
     code = models.CharField(max_length=20, unique=True)

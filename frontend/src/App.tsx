@@ -4,18 +4,100 @@ import { StorePage } from './pages/StorePage';
 import { ProductDetail } from './pages/ProductDetail';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { CustomerDashboard } from './pages/CustomerDashboard';
-import { fetchProfile, logoutUser, fetchCategories, fetchProducts, loginUser, signupUser, createOrder, sendSupportChatMessage } from './api';
-import type { UserProfile, Category, Product } from './types';
+import { AuthPage } from './pages/AuthPage';
+import {
+  fetchProfile, logoutUser, fetchCategories, fetchProducts,
+  loginUser, signupUser, createOrder, validateDiscountCode, sendSupportChatMessage
+} from './api';
+import type { UserProfile, Category, Product, OrderData } from './types';
 import { CartProvider, useCart } from './context/CartContext';
 import { WishlistProvider, useWishlist } from './context/WishlistContext';
 import { CompareProvider, useCompare } from './context/CompareContext';
-import { Search, User, Shield, LogOut, Phone, ChevronDown, ChevronRight, X, ShoppingCart, CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale, Eye, EyeOff, Menu, ShoppingBag, CheckCircle, Trash2 } from 'lucide-react';
+import {
+  Search, User, Shield, LogOut, Phone, ChevronDown, X, ShoppingCart,
+  CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale,
+  Eye, EyeOff, Menu, ShoppingBag, CheckCircle, Trash2, Lock, Tag, AlertCircle, MapPin
+} from 'lucide-react';
 
-const slugify = (text: string) => text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-');
+const slugify = (text: string) =>
+  text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-');
 
-// ============================================================================
-// RESPONSIVE / CROSS-DEVICE HELPERS
-// ============================================================================
+// Zero-dependency Markdown formatter for AI Chat bubbles (**bold**, bullets, numbered lists)
+function renderChatMarkdown(text: string, isUser: boolean = false) {
+  const formatInline = (line: string): React.ReactNode[] => {
+    const parts = line.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+        return (
+          <strong key={idx} className={isUser ? 'font-black text-white' : 'font-black text-slate-900'}>
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      return <React.Fragment key={idx}>{part}</React.Fragment>;
+    });
+  };
+
+  const lines = (text || '').split('\n');
+  return (
+    <div className="space-y-1.5">
+      {lines.map((rawLine, idx) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed) return <div key={idx} className="h-1" />;
+
+        const bulletMatch = trimmed.match(/^([*-•])\s+(.*)$/);
+        if (bulletMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-1">
+              <span className={`w-1.5 h-1.5 rounded-full mt-2 shrink-0 ${isUser ? 'bg-indigo-200' : 'bg-indigo-600'}`} />
+              <span className="flex-1 leading-relaxed">{formatInline(bulletMatch[2])}</span>
+            </div>
+          );
+        }
+
+        const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/);
+        if (numMatch) {
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-0.5">
+              <span className={`text-xs font-black mt-0.5 shrink-0 ${isUser ? 'text-indigo-200' : 'text-indigo-600'}`}>
+                {numMatch[1]}.
+              </span>
+              <span className="flex-1 leading-relaxed">{formatInline(numMatch[2])}</span>
+            </div>
+          );
+        }
+
+        return (
+          <p key={idx} className="leading-relaxed">
+            {formatInline(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+const getCachedAiReply = (key: string): string | null => {
+  try {
+    const raw = sessionStorage.getItem('aura_ai_chat_cache_v1');
+    if (!raw) return null;
+    const map = JSON.parse(raw);
+    return map[key] || null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedAiReply = (key: string, reply: string) => {
+  try {
+    const raw = sessionStorage.getItem('aura_ai_chat_cache_v1');
+    const map = raw ? JSON.parse(raw) : {};
+    map[key] = reply;
+    sessionStorage.setItem('aura_ai_chat_cache_v1', JSON.stringify(map));
+  } catch {
+    // Ignore storage quota errors
+  }
+};
 
 let scrollLockCount = 0;
 function useBodyScrollLock(locked: boolean) {
@@ -76,27 +158,42 @@ const getBrandsForCategory = (products: Product[], cat: Category) => {
   const matchedProds = products.filter(p => {
     return String(p.category) === String(cat.id) || String(p.category_name || '').toLowerCase() === String(cat.name || '').toLowerCase();
   });
-  return Array.from(new Set(matchedProds.map(p => p.brand).filter(b => Boolean(b) && String(b).trim() !== '')));
+  return Array.from(new Set(matchedProds.map(p => p.brand).filter((b): b is string => Boolean(b) && String(b).trim() !== '')));
 };
 
 function useCatalog() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
-  useEffect(() => {
-    let isMounted = true;
-    Promise.all([fetchCategories(), fetchProducts()]).then(([cats, prods]) => {
-      if (isMounted) { setCategories(cats); setProducts(prods); }
-    }).catch(console.error);
-    return () => { isMounted = false; };
+  const reloadCatalog = useCallback(() => {
+    Promise.all([fetchCategories(), fetchProducts()])
+      .then(([cats, prods]) => {
+        setCategories(cats);
+        setProducts(prods);
+      })
+      .catch(console.error);
   }, []);
 
-  return { categories, products };
+  useEffect(() => {
+    reloadCatalog();
+    window.addEventListener('catalog-updated', reloadCatalog);
+    return () => window.removeEventListener('catalog-updated', reloadCatalog);
+  }, [reloadCatalog]);
+
+  return { categories, products, reloadCatalog };
 }
 
 function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void }) {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [formData, setFormData] = useState({ name: '', phone: '', email: '', password: '', confirmPassword: '' });
+  const [formData, setFormData] = useState({
+    identifier: '',
+    name: '',
+    phone: '',
+    email: '',
+    shipping_address: '',
+    password: '',
+    confirmPassword: ''
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
@@ -106,7 +203,7 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
 
   useEffect(() => {
     if (!isOpen) return;
-    
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
@@ -116,12 +213,13 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
     script.onload = () => {
       if ((window as any).google) {
         (window as any).google.accounts.id.initialize({
-          client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com', 
+          client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
           callback: async (response: any) => {
             setLoading(true);
             try {
               const res = await fetch('http://127.0.0.1:8000/api/auth/google/', {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: response.credential })
               });
@@ -144,68 +242,121 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
         }
       }
     };
-  }, [isOpen, mode]);
+  }, [isOpen, mode, onSuccess]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); 
-    setError(''); 
-    
+    e.preventDefault();
+    setError('');
+
     if (mode === 'signup') {
-      if (formData.password.length < 8) return setError("Password must be at least 8 characters.");
-      if (formData.password !== formData.confirmPassword) return setError("Passwords do not match.");
+      if (formData.password.length < 8) return setError('Password must be at least 8 characters.');
+      if (formData.password !== formData.confirmPassword) return setError('Passwords do not match.');
     }
 
     setLoading(true);
     try {
       if (mode === 'login') {
-        await loginUser({ email: formData.email, password: formData.password });
+        await loginUser({ identifier: formData.identifier, password: formData.password });
       } else {
-        await signupUser({ name: formData.name, phone: formData.phone, email: formData.email, password: formData.password });
+        await signupUser({
+          name: formData.name,
+          phone: formData.phone,
+          email: formData.email,
+          shipping_address: formData.shipping_address,
+          password: formData.password
+        });
       }
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data?.error || 'Authentication failed. Please check your inputs.');
-    } finally { 
-      setLoading(false); 
+    } finally {
+      setLoading(false);
     }
   };
 
-  const inputClass = "w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl text-base sm:text-sm font-semibold focus:outline-none focus:border-slate-900 focus:bg-white transition";
+  const inputClass = 'w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl text-base sm:text-sm font-semibold focus:outline-none focus:border-slate-900 focus:bg-white transition';
 
   return (
-    <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm overflow-y-auto overscroll-contain" role="dialog" aria-modal="true" aria-label={mode === 'login' ? 'Sign in' : 'Create account'}>
+    <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm overflow-y-auto overscroll-contain" role="dialog" aria-modal="true">
       <div className="flex min-h-full items-center justify-center p-3 sm:p-4">
-        <div className="bg-white rounded-3xl sm:rounded-[2rem] shadow-2xl w-full max-w-[420px] p-5 sm:p-8 relative my-4 sm:my-8 border border-slate-100">
-          <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 sm:top-5 sm:right-5 text-slate-400 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 p-2 rounded-full transition"><X className="w-5 h-5" /></button>
-          
-          <div className="text-center mb-6 sm:mb-8">
+        <div className="bg-white rounded-3xl sm:rounded-[2rem] shadow-2xl w-full max-w-[430px] p-5 sm:p-8 relative my-4 sm:my-8 border border-slate-100">
+          <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 sm:top-5 sm:right-5 text-slate-400 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 p-2 rounded-full transition">
+            <X className="w-5 h-5" />
+          </button>
+
+          <div className="text-center mb-6">
             <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xl mx-auto mb-4 shadow-md">AT</div>
             <h2 className="text-2xl font-black text-slate-900 mb-1 tracking-tight">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-            <p className="text-sm font-medium text-slate-500">{mode === 'login' ? 'Sign in to continue' : 'Join AuraTech today'}</p>
+            <p className="text-sm font-medium text-slate-500">
+              {mode === 'login' ? 'Sign in with your Email, Phone, or Username' : 'Join AuraTech for seamless shopping'}
+            </p>
           </div>
 
-          {error && <div className="mb-6 p-4 bg-rose-50 text-rose-600 text-xs font-bold rounded-2xl border border-rose-100 text-center">{error}</div>}
-          
+          {error && <div className="mb-5 p-4 bg-rose-50 text-rose-600 text-xs font-bold rounded-2xl border border-rose-100 text-center">{error}</div>}
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'signup' && (
+            {mode === 'login' ? (
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Full Name</label>
-                <input type="text" required className={inputClass} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="John Doe" />
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Email, Phone, or Username</label>
+                <input
+                  type="text"
+                  required
+                  className={inputClass}
+                  value={formData.identifier}
+                  onChange={e => setFormData({ ...formData, identifier: e.target.value })}
+                  placeholder="name@company.com or 017XXXXXXXX"
+                />
               </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Email address</label>
-              <input type="email" required className={inputClass} value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="name@company.com" />
-            </div>
-
-            {mode === 'signup' && (
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Phone number</label>
-                <input type="tel" required className={inputClass} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="+880..." />
-              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Full Name</label>
+                  <input
+                    type="text"
+                    required
+                    className={inputClass}
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                    placeholder="Md. Alinur"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      className={inputClass}
+                      value={formData.email}
+                      onChange={e => setFormData({ ...formData, email: e.target.value })}
+                      placeholder="name@email.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Phone Number</label>
+                    <input
+                      type="tel"
+                      required
+                      className={inputClass}
+                      value={formData.phone}
+                      onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                      placeholder="017XXXXXXXX"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Default Delivery Address (Optional)</label>
+                  <input
+                    type="text"
+                    className={inputClass}
+                    value={formData.shipping_address}
+                    onChange={e => setFormData({ ...formData, shipping_address: e.target.value })}
+                    placeholder="House, Road, Area, Dhaka"
+                  />
+                </div>
+              </>
             )}
 
             <div>
@@ -214,8 +365,19 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
                 {mode === 'signup' && <span className="text-[10px] text-slate-400 font-semibold">Min 8 chars</span>}
               </div>
               <div className="relative">
-                <input type={showPassword ? "text" : "password"} required className={`${inputClass} pr-12`} value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} placeholder="••••••••" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-900 transition">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  className={`${inputClass} pr-12`}
+                  value={formData.password}
+                  onChange={e => setFormData({ ...formData, password: e.target.value })}
+                  placeholder="••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-900 transition"
+                >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
@@ -223,41 +385,46 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
 
             {mode === 'signup' && (
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Confirm password</label>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Confirm Password</label>
                 <div className="relative">
-                  <input type={showConfirmPassword ? "text" : "password"} required className={`${inputClass} pr-12`} value={formData.confirmPassword} onChange={e => setFormData({...formData, confirmPassword: e.target.value})} placeholder="••••••••" />
-                  <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label={showConfirmPassword ? 'Hide password' : 'Show password'} className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-900 transition">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    className={`${inputClass} pr-12`}
+                    value={formData.confirmPassword}
+                    onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    placeholder="••••••••"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-900 transition"
+                  >
                     {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 </div>
               </div>
             )}
 
-            {mode === 'login' && (
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs py-2">
-                <label className="flex items-center gap-2 cursor-pointer group py-1">
-                  <input type="checkbox" className="w-4 h-4 rounded border-slate-300 accent-slate-900" />
-                  <span className="font-bold text-slate-500 group-hover:text-slate-900 transition">Remember me</span>
-                </label>
-                <a href="#" className="text-slate-900 font-bold hover:underline py-1">Forgot password?</a>
-              </div>
-            )}
-
-            <button type="submit" disabled={loading} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-bold shadow-md transition disabled:opacity-70 mt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-sm font-bold shadow-md transition disabled:opacity-70 mt-2"
+            >
               {loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}
             </button>
           </form>
 
-          <div className="mt-6 sm:mt-8 flex items-center justify-center space-x-4">
+          <div className="mt-6 flex items-center justify-center space-x-4">
             <span className="h-px bg-slate-100 flex-1"></span>
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Or</span>
             <span className="h-px bg-slate-100 flex-1"></span>
           </div>
 
-          <div id="googleSignInDiv" className="mt-6 sm:mt-8 flex justify-center w-full"></div>
+          <div id="googleSignInDiv" className="mt-6 flex justify-center w-full"></div>
 
-          <div className="mt-6 sm:mt-8 text-center text-sm font-bold text-slate-500">
-            {mode === 'login' ? "New to AuraTech? " : "Already registered? "}
+          <div className="mt-6 text-center text-sm font-bold text-slate-500">
+            {mode === 'login' ? 'New to AuraTech? ' : 'Already registered? '}
             <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(''); }} className="text-slate-900 hover:underline">
               {mode === 'login' ? 'Create an account' : 'Sign in'}
             </button>
@@ -268,135 +435,627 @@ function AuthModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: (
   );
 }
 
-function CartDrawer({ user }: { user: UserProfile | null }) {
+function CartDrawer({ user, onOpenAuth }: { user: UserProfile | null; onOpenAuth: () => void }) {
   const { cartItems, removeFromCart, updateQuantity, clearCart, isCartOpen, closeCart } = useCart();
   const [step, setStep] = useState<'cart' | 'checkout' | 'payment' | 'success'>('cart');
-  const [shippingInfo, setShippingInfo] = useState({ name: user?.username || '', address: '', phone: '' });
-  const [paymentMethod, setPaymentMethod] = useState<'bkash' | 'card' | 'cod'>('bkash');
+
+  const [shippingInfo, setShippingInfo] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    address: '',
+    city: 'Dhaka',
+    postal_code: '',
+    country: 'Bangladesh',
+    notes: ''
+  });
+
+  const [paymentMethod, setPaymentMethod] = useState<'card' | 'bkash' | 'nagad' | 'cod'>('card');
+  const [cardDetails, setCardDetails] = useState({
+    card_holder_name: '',
+    card_number: '',
+    card_expiry: '',
+    card_cvv: ''
+  });
+  const [mobileDetails, setMobileDetails] = useState({
+    payment_phone: '',
+    bkash_trx_id: ''
+  });
+
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; percent: number; amount: number } | null>(null);
+  const [promoError, setPromoError] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [completedOrder, setCompletedOrder] = useState<OrderData | null>(null);
 
   useBodyScrollLock(isCartOpen);
 
-  useEffect(() => { 
+  useEffect(() => {
+    if (user) {
+      setShippingInfo(prev => ({
+        ...prev,
+        name: prev.name || user.name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || '',
+        email: prev.email || user.email || '',
+        phone: prev.phone || user.phone || '',
+        address: prev.address || user.default_shipping_address || user.shipping_address || '',
+        city: prev.city || user.city || 'Dhaka',
+        postal_code: prev.postal_code || user.postal_code || ''
+      }));
+      setCardDetails(prev => ({
+        ...prev,
+        card_holder_name: prev.card_holder_name || user.name || user.username || ''
+      }));
+    }
+  }, [user, isCartOpen]);
+
+  useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout>;
     if (!isCartOpen) {
-      timeoutId = setTimeout(() => { setStep('cart'); }, 300);
+      timeoutId = setTimeout(() => {
+        setStep('cart');
+        setCheckoutError('');
+      }, 300);
     }
     return () => { if (timeoutId) clearTimeout(timeoutId); };
   }, [isCartOpen]);
 
-  const cartTotal = cartItems.reduce((total, item) => total + (Number(item.product.cash_discount_price || item.product.price || 0) * item.quantity), 0);
+  const subtotal = cartItems.reduce(
+    (total, item) => total + Number(item.product.cash_discount_price || item.product.price || 0) * item.quantity,
+    0
+  );
+  const discountAmount = appliedDiscount ? Math.round((subtotal * appliedDiscount.percent) / 100) : 0;
+  const shippingFee = subtotal >= 5000 || subtotal === 0 ? 0 : 120;
+  const grandTotal = Math.max(0, subtotal - discountAmount + shippingFee);
 
   if (!isCartOpen) return null;
 
-  const handleCheckout = async () => {
-    setIsProcessing(true);
+  const formatCardNumber = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 16);
+    return digits.replace(/(\d{4})(?=\d)/g, '$1 ');
+  };
+
+  const formatExpiry = (val: string) => {
+    const digits = val.replace(/\D/g, '').slice(0, 4);
+    if (digits.length >= 3) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return digits;
+  };
+
+  const handleApplyPromo = async () => {
+    setPromoError('');
+    if (!promoInput.trim()) return;
     try {
-      await createOrder({
-        items: cartItems.map(item => ({ product_id: item.product.id, quantity: item.quantity })),
-        shipping: shippingInfo, 
-        payment_method: paymentMethod, 
-        total: cartTotal
+      const res = await validateDiscountCode(promoInput.trim(), subtotal);
+      setAppliedDiscount({
+        code: res.code,
+        percent: res.discount_percent,
+        amount: res.discount_amount
       });
-      clearCart();
-      setStep('success');
-    } catch (err) {
-      alert("Failed to process payment. Backend API error.");
-    } finally { 
-      setIsProcessing(false); 
+      setPromoInput('');
+    } catch (err: any) {
+      setPromoError(err.response?.data?.error || 'Invalid promo code.');
     }
   };
 
-  const fieldClass = "w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl text-base sm:text-sm focus:outline-none focus:border-slate-900 focus:bg-white transition";
+  const handleProceedToPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCheckoutError('');
+    if (!shippingInfo.name.trim() || !shippingInfo.email.trim() || !shippingInfo.phone.trim() || !shippingInfo.address.trim()) {
+      setCheckoutError('Please complete all required customer & delivery fields.');
+      return;
+    }
+    setStep('payment');
+  };
+
+  const handleCompleteTransaction = async () => {
+    setCheckoutError('');
+
+    if (paymentMethod === 'card') {
+      const rawDigits = cardDetails.card_number.replace(/\D/g, '');
+      if (!cardDetails.card_holder_name.trim()) return setCheckoutError('Please enter the cardholder name.');
+      if (rawDigits.length < 13 || rawDigits.length > 19) return setCheckoutError('Please enter a valid 16-digit card number.');
+      if (!/^(0[1-9]|1[0-2])\/\d{2,4}$/.test(cardDetails.card_expiry.trim())) return setCheckoutError('Please enter a valid card expiry date (MM/YY).');
+      if (!/^\d{3,4}$/.test(cardDetails.card_cvv.trim())) return setCheckoutError('Please enter a valid 3 or 4 digit CVV code.');
+    } else if (paymentMethod === 'bkash' || paymentMethod === 'nagad') {
+      if (!mobileDetails.payment_phone.trim()) return setCheckoutError(`Please enter your ${paymentMethod.toUpperCase()} account number.`);
+      if (!mobileDetails.bkash_trx_id.trim()) return setCheckoutError('Please enter your Payment Transaction ID (TrxID).');
+    }
+
+    setIsProcessing(true);
+    try {
+      const orderRes = await createOrder({
+        items: cartItems.map(item => ({
+          product_id: item.product.id,
+          quantity: item.quantity,
+          selected_variants: item.selectedVariants || {}
+        })),
+        shipping: shippingInfo,
+        payment_method: paymentMethod,
+        payment_details: paymentMethod === 'card' ? cardDetails : mobileDetails,
+        discount_code: appliedDiscount?.code || '',
+        shipping_fee: shippingFee,
+        total: grandTotal
+      });
+      setCompletedOrder(orderRes);
+      clearCart();
+      setAppliedDiscount(null);
+      setStep('success');
+      window.dispatchEvent(new CustomEvent('catalog-updated'));
+    } catch (err: any) {
+      setCheckoutError(err.response?.data?.error || 'Transaction failed. Please verify your details and try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const fieldClass = 'w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl text-sm font-semibold focus:outline-none focus:border-slate-900 focus:bg-white transition';
 
   return (
     <div className="fixed inset-0 z-[110] flex justify-end" role="dialog" aria-modal="true" aria-label="Shopping bag">
       <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={closeCart}></div>
-      <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col transform transition-transform duration-300">
-        <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-          <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-3 tracking-tight">
-            <ShoppingBag className="w-5 h-5"/> 
-            {step === 'cart' ? 'Your Bag' : step === 'success' ? 'Confirmed' : 'Checkout'}
-          </h2>
-          <button onClick={closeCart} aria-label="Close bag" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition"><X className="w-5 h-5"/></button>
+      <div className="relative w-full max-w-lg bg-white h-full shadow-2xl flex flex-col transform transition-transform duration-300">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
+          <div>
+            <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2.5 tracking-tight">
+              <ShoppingBag className="w-5 h-5" />
+              {step === 'cart' && 'Shopping Bag'}
+              {step === 'checkout' && 'Customer & Delivery Info'}
+              {step === 'payment' && 'Payment & Billing'}
+              {step === 'success' && 'Order Invoice'}
+            </h2>
+            {step !== 'cart' && step !== 'success' && (
+              <div className="flex items-center gap-2 mt-1 text-[11px] font-bold text-slate-400">
+                <span className={step === 'checkout' ? 'text-slate-900' : 'text-emerald-600'}>1. Customer Info</span>
+                <span>→</span>
+                <span className={step === 'payment' ? 'text-slate-900' : ''}>2. Payment</span>
+              </div>
+            )}
+          </div>
+          <button onClick={closeCart} aria-label="Close bag" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition">
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6 space-y-4 bg-slate-50/50">
+          {checkoutError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-100 text-rose-600 text-xs font-bold rounded-2xl flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {checkoutError}
+            </div>
+          )}
+
           {step === 'cart' && (
-            cartItems.length === 0 ? <div className="text-center py-20 text-slate-400 flex flex-col items-center"><ShoppingBag className="w-12 h-12 mb-4 opacity-50"/><p className="font-bold text-slate-500">Your bag is empty.</p></div> :
-            cartItems.map((item, idx) => (
-              <div key={idx} className="flex gap-3 sm:gap-4 bg-white p-3 sm:p-4 rounded-2xl sm:rounded-3xl shadow-sm border border-slate-100 transition hover:shadow-md">
-                <img src={item.product.image_display_url || item.product.image_url} alt={item.product.name} className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 object-contain rounded-2xl border border-slate-100 bg-slate-50 p-2" />
-                <div className="flex-1 flex flex-col justify-between min-w-0">
-                  <div>
-                    <h4 className="font-bold text-sm text-slate-900 line-clamp-1 tracking-tight mb-1">{item.product.name}</h4>
-                    <p className="text-slate-900 font-black text-base">৳{Number(item.product.cash_discount_price || item.product.price || 0).toLocaleString()}</p>
-                  </div>
-                  <div className="flex items-center justify-between mt-2 gap-2">
-                    <div className="flex items-center border border-slate-200 rounded-full bg-slate-50 p-0.5">
-                      <button onClick={() => updateQuantity(item.product.id, item.quantity - 1)} aria-label="Decrease quantity" className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-slate-600 hover:bg-white hover:shadow-sm transition">-</button>
-                      <span className="px-3 text-xs font-bold">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.product.id, item.quantity + 1)} aria-label="Increase quantity" className="w-8 h-8 sm:w-7 sm:h-7 rounded-full flex items-center justify-center font-bold text-slate-600 hover:bg-white hover:shadow-sm transition">+</button>
-                    </div>
-                    <button onClick={() => removeFromCart(item.product.id)} aria-label="Remove item" className="text-rose-400 hover:text-rose-600 p-2 rounded-full hover:bg-rose-50 transition"><Trash2 className="w-4 h-4"/></button>
-                  </div>
-                </div>
+            cartItems.length === 0 ? (
+              <div className="text-center py-24 text-slate-400 flex flex-col items-center">
+                <ShoppingBag className="w-12 h-12 mb-4 opacity-40" />
+                <p className="font-bold text-slate-600">Your shopping bag is empty.</p>
+                <p className="text-xs text-slate-400 mt-1">Explore our catalog and add items to your bag.</p>
               </div>
-            ))
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {cartItems.map((item, idx) => (
+                    <div key={idx} className="flex gap-3.5 bg-white p-3.5 rounded-3xl shadow-sm border border-slate-100">
+                      <img
+                        src={item.product.image_display_url || item.product.image_url}
+                        alt={item.product.name}
+                        className="w-18 h-18 sm:w-20 sm:h-20 shrink-0 object-contain rounded-2xl border border-slate-100 bg-slate-50 p-2"
+                      />
+                      <div className="flex-1 flex flex-col justify-between min-w-0">
+                        <div>
+                          <h4 className="font-bold text-sm text-slate-900 line-clamp-1 tracking-tight">{item.product.name}</h4>
+                          {item.selectedVariants && Object.keys(item.selectedVariants).length > 0 && (
+                            <p className="text-[11px] font-semibold text-slate-400 mt-0.5">
+                              {Object.entries(item.selectedVariants).map(([k, v]) => `${k}: ${v}`).join(' • ')}
+                            </p>
+                          )}
+                          <p className="text-slate-900 font-black text-base mt-1">
+                            ৳{Number(item.product.cash_discount_price || item.product.price || 0).toLocaleString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between mt-2">
+                          <div className="flex items-center border border-slate-200 rounded-full bg-slate-50 p-0.5">
+                            <button onClick={() => updateQuantity(item.product.id, item.quantity - 1)} className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-slate-600 hover:bg-white transition">-</button>
+                            <span className="px-3 text-xs font-bold">{item.quantity}</span>
+                            <button onClick={() => updateQuantity(item.product.id, item.quantity + 1)} className="w-7 h-7 rounded-full flex items-center justify-center font-bold text-slate-600 hover:bg-white transition">+</button>
+                          </div>
+                          <button onClick={() => removeFromCart(item.product.id)} className="text-rose-400 hover:text-rose-600 p-2 rounded-full hover:bg-rose-50 transition">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="bg-white p-4 rounded-3xl border border-slate-100 space-y-2">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5" /> Promo / Discount Code
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={promoInput}
+                      onChange={e => setPromoInput(e.target.value.toUpperCase())}
+                      placeholder="Enter code"
+                      className="flex-1 bg-slate-50 border border-slate-200 px-3.5 py-2.5 rounded-xl text-xs font-bold uppercase focus:outline-none focus:border-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyPromo}
+                      className="px-4 py-2.5 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition"
+                    >
+                      Apply
+                    </button>
+                  </div>
+                  {promoError && <p className="text-xs text-rose-500 font-semibold">{promoError}</p>}
+                  {appliedDiscount && (
+                    <div className="flex items-center justify-between text-xs font-bold text-emerald-600 bg-emerald-50 px-3 py-2 rounded-xl">
+                      <span>Code {appliedDiscount.code} ({appliedDiscount.percent}% OFF) applied!</span>
+                      <button onClick={() => setAppliedDiscount(null)} className="text-rose-500 hover:underline">Remove</button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )
           )}
 
           {step === 'checkout' && (
-            <div className="bg-white p-4 sm:p-6 rounded-2xl sm:rounded-3xl shadow-sm border border-slate-100 space-y-4">
-              <h3 className="font-bold text-slate-900 tracking-tight">Shipping Details</h3>
-              <input type="text" className={fieldClass} value={shippingInfo.name} onChange={e => setShippingInfo({...shippingInfo, name: e.target.value})} placeholder="Full Name" />
-              <input type="text" inputMode="tel" className={fieldClass} value={shippingInfo.phone} onChange={e => setShippingInfo({...shippingInfo, phone: e.target.value})} placeholder="Phone Number" />
-              <textarea rows={3} className={`${fieldClass} resize-none`} value={shippingInfo.address} onChange={e => setShippingInfo({...shippingInfo, address: e.target.value})} placeholder="Delivery Address" />
-            </div>
+            <form id="checkout-shipping-form" onSubmit={handleProceedToPayment} className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 space-y-4">
+              <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                <MapPin className="w-4 h-4 text-slate-900" />
+                <h3 className="font-bold text-slate-900 text-sm">Customer & Delivery Information</h3>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  className={fieldClass}
+                  value={shippingInfo.name}
+                  onChange={e => setShippingInfo({ ...shippingInfo, name: e.target.value })}
+                  placeholder="Md. Alinur"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Email Address *</label>
+                  <input
+                    type="email"
+                    required
+                    className={fieldClass}
+                    value={shippingInfo.email}
+                    onChange={e => setShippingInfo({ ...shippingInfo, email: e.target.value })}
+                    placeholder="customer@email.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Phone Number *</label>
+                  <input
+                    type="tel"
+                    required
+                    className={fieldClass}
+                    value={shippingInfo.phone}
+                    onChange={e => setShippingInfo({ ...shippingInfo, phone: e.target.value })}
+                    placeholder="017XXXXXXXX"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Street / Delivery Address *</label>
+                <textarea
+                  rows={2}
+                  required
+                  className={`${fieldClass} resize-none`}
+                  value={shippingInfo.address}
+                  onChange={e => setShippingInfo({ ...shippingInfo, address: e.target.value })}
+                  placeholder="House #, Road #, Sector / Area"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">City *</label>
+                  <input
+                    type="text"
+                    required
+                    className={fieldClass}
+                    value={shippingInfo.city}
+                    onChange={e => setShippingInfo({ ...shippingInfo, city: e.target.value })}
+                    placeholder="Dhaka"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Postal Code</label>
+                  <input
+                    type="text"
+                    className={fieldClass}
+                    value={shippingInfo.postal_code}
+                    onChange={e => setShippingInfo({ ...shippingInfo, postal_code: e.target.value })}
+                    placeholder="1200"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Delivery Instructions (Optional)</label>
+                <input
+                  type="text"
+                  className={fieldClass}
+                  value={shippingInfo.notes}
+                  onChange={e => setShippingInfo({ ...shippingInfo, notes: e.target.value })}
+                  placeholder="Call before delivery, leave at gate, etc."
+                />
+              </div>
+            </form>
           )}
 
           {step === 'payment' && (
             <div className="space-y-4">
-              <h3 className="font-bold text-slate-900 px-2 tracking-tight">Select Payment</h3>
-              <label className={`flex items-center gap-3 sm:gap-4 p-4 sm:p-5 rounded-2xl sm:rounded-3xl border cursor-pointer transition ${paymentMethod === 'bkash' ? 'border-[#e2136e] bg-[#e2136e]/5 ring-1 ring-[#e2136e]' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                <input type="radio" value="bkash" className="sr-only" checked={paymentMethod === 'bkash'} onChange={() => setPaymentMethod('bkash')} />
-                <div className="w-11 h-11 sm:w-12 sm:h-12 shrink-0 bg-[#e2136e] rounded-2xl flex items-center justify-center text-white shadow-sm"><Smartphone className="w-6 h-6"/></div>
-                <div><h4 className="font-bold text-slate-900">bKash Banking</h4></div>
-              </label>
-              {paymentMethod === 'bkash' && <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-3xl border border-[#e2136e]/20"><input type="text" inputMode="tel" placeholder="bKash Number" className="w-full bg-slate-50 border border-slate-200 p-3.5 rounded-2xl text-base sm:text-sm outline-none focus:border-[#e2136e] transition" /></div>}
+              <div className="grid grid-cols-2 gap-2.5">
+                {[
+                  { id: 'card', label: 'Credit / Debit Card', icon: CreditCard },
+                  { id: 'bkash', label: 'bKash Payment', icon: Smartphone },
+                  { id: 'nagad', label: 'Nagad Payment', icon: Smartphone },
+                  { id: 'cod', label: 'Cash on Delivery', icon: Truck }
+                ].map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setPaymentMethod(m.id as any)}
+                    className={`p-3.5 rounded-2xl border text-left transition flex items-center gap-2.5 ${
+                      paymentMethod === m.id
+                        ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <m.icon className="w-4 h-4 shrink-0" />
+                    <span className="text-xs font-bold leading-tight">{m.label}</span>
+                  </button>
+                ))}
+              </div>
 
-              <label className={`flex items-center gap-3 sm:gap-4 p-4 sm:p-5 rounded-2xl sm:rounded-3xl border cursor-pointer transition ${paymentMethod === 'card' ? 'border-slate-900 bg-slate-50 ring-1 ring-slate-900' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                <input type="radio" value="card" className="sr-only" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} />
-                <div className="w-11 h-11 sm:w-12 sm:h-12 shrink-0 bg-slate-900 rounded-2xl flex items-center justify-center text-white shadow-sm"><CreditCard className="w-6 h-6"/></div>
-                <div><h4 className="font-bold text-slate-900">Credit / Debit Card</h4></div>
-              </label>
+              {paymentMethod === 'card' && (
+                <div className="bg-white p-5 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="w-4 h-4 text-slate-900" />
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-900">Card Details</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400">
+                      <Lock className="w-3 h-3 text-emerald-600" /> 256-Bit SSL Encrypted
+                    </div>
+                  </div>
 
-              <label className={`flex items-center gap-3 sm:gap-4 p-4 sm:p-5 rounded-2xl sm:rounded-3xl border cursor-pointer transition ${paymentMethod === 'cod' ? 'border-emerald-600 bg-emerald-50 ring-1 ring-emerald-600' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
-                <input type="radio" value="cod" className="sr-only" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
-                <div className="w-11 h-11 sm:w-12 sm:h-12 shrink-0 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-sm"><Truck className="w-6 h-6"/></div>
-                <div><h4 className="font-bold text-slate-900">Cash on Delivery</h4></div>
-              </label>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Cardholder Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="NAME ON CARD"
+                      value={cardDetails.card_holder_name}
+                      onChange={e => setCardDetails({ ...cardDetails, card_holder_name: e.target.value })}
+                      className={fieldClass}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Card Number *</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      required
+                      placeholder="4532 •••• •••• ••••"
+                      value={cardDetails.card_number}
+                      onChange={e => setCardDetails({ ...cardDetails, card_number: formatCardNumber(e.target.value) })}
+                      className={`${fieldClass} font-mono tracking-wider`}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Expiry Date (MM/YY) *</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        placeholder="08/29"
+                        value={cardDetails.card_expiry}
+                        onChange={e => setCardDetails({ ...cardDetails, card_expiry: formatExpiry(e.target.value) })}
+                        className={`${fieldClass} font-mono`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">CVV / CVC *</label>
+                      <input
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        required
+                        placeholder="•••"
+                        value={cardDetails.card_cvv}
+                        onChange={e => setCardDetails({ ...cardDetails, card_cvv: e.target.value.replace(/\D/g, '').slice(0, 4) })}
+                        className={`${fieldClass} font-mono`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(paymentMethod === 'bkash' || paymentMethod === 'nagad') && (
+                <div className="bg-white p-5 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <span className="text-xs font-black uppercase tracking-wider text-slate-900">
+                      {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Merchant Payment
+                    </span>
+                    <span className="text-xs font-bold text-emerald-600">Merchant: 01700-000000</span>
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                      Your {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Account Number *
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      placeholder="017XXXXXXXX"
+                      value={mobileDetails.payment_phone}
+                      onChange={e => setMobileDetails({ ...mobileDetails, payment_phone: e.target.value })}
+                      className={fieldClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">
+                      Transaction ID (TrxID) *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. BKA82910XY"
+                      value={mobileDetails.bkash_trx_id}
+                      onChange={e => setMobileDetails({ ...mobileDetails, bkash_trx_id: e.target.value.toUpperCase() })}
+                      className={`${fieldClass} font-mono uppercase`}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {paymentMethod === 'cod' && (
+                <div className="bg-white p-5 rounded-3xl border border-slate-200 space-y-2 shadow-sm">
+                  <h4 className="font-bold text-sm text-slate-900">Cash on Delivery</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Pay in cash directly to our courier partner when your order arrives at <strong className="text-slate-800">{shippingInfo.address}, {shippingInfo.city}</strong>.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {step === 'success' && (
-            <div className="text-center mt-16 sm:mt-32 space-y-4">
-              <div className="w-20 h-20 sm:w-24 sm:h-24 bg-emerald-50 border border-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6"><CheckCircle className="w-10 h-10 sm:w-12 sm:h-12"/></div>
-              <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Confirmed!</h3>
-              <p className="text-slate-500 font-medium mb-8">Your order has been placed successfully.</p>
-              <button onClick={closeCart} className="px-8 py-3.5 bg-slate-900 text-white font-bold rounded-full shadow-md hover:bg-slate-800 transition w-full">Continue Shopping</button>
+          {step === 'success' && completedOrder && (
+            <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-5">
+              <div className="text-center">
+                <div className="w-16 h-16 bg-emerald-50 border border-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <CheckCircle className="w-8 h-8" />
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tight">Transaction Complete</h3>
+                <p className="text-xs font-semibold text-slate-400 mt-1">
+                  Order #{completedOrder.id} • {completedOrder.transaction_id}
+                </p>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-2xl space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Customer</span>
+                  <span className="font-bold text-slate-900">{completedOrder.customer_name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Phone</span>
+                  <span className="font-bold text-slate-900">{completedOrder.phone}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Delivery Address</span>
+                  <span className="font-bold text-slate-900 text-right max-w-[60%]">{completedOrder.shipping_address}, {completedOrder.city}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Payment Status</span>
+                  <span className={`font-black uppercase ${completedOrder.payment_status === 'PAID' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {completedOrder.payment_status} ({completedOrder.masked_card || completedOrder.payment_method.toUpperCase()})
+                  </span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-slate-200 text-sm">
+                  <span className="font-bold text-slate-900">Amount Total</span>
+                  <span className="font-black text-slate-900">৳{Number(completedOrder.total_amount).toLocaleString()}</span>
+                </div>
+              </div>
+
+              <button
+                onClick={closeCart}
+                className="w-full py-3.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-full shadow-md transition text-sm"
+              >
+                Continue Shopping
+              </button>
             </div>
           )}
         </div>
 
-        {step !== 'success' && cartItems?.length > 0 && (
-          <div className="p-4 sm:p-6 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white space-y-4 shadow-[0_-10px_40px_rgba(0,0,0,0.04)] z-10 shrink-0">
-            <div className="flex justify-between items-center text-slate-900 mb-2">
-              <span className="font-bold text-slate-500">Total</span>
-              <span className="font-black text-xl sm:text-2xl tracking-tight">৳{cartTotal.toLocaleString()}</span>
+        {step !== 'success' && cartItems.length > 0 && (
+          <div className="p-5 border-t border-slate-100 bg-white space-y-3 shadow-[0_-10px_40px_rgba(0,0,0,0.04)] z-10 shrink-0">
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between text-slate-500 font-medium">
+                <span>Subtotal</span>
+                <span>৳{subtotal.toLocaleString()}</span>
+              </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-bold">
+                  <span>Promo Discount ({appliedDiscount?.code})</span>
+                  <span>-৳{discountAmount.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-slate-500 font-medium">
+                <span>Delivery Charge</span>
+                <span>{shippingFee === 0 ? 'FREE' : `৳${shippingFee}`}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-900 pt-2 border-t border-slate-100">
+                <span className="font-bold text-sm">Total Payable</span>
+                <span className="font-black text-xl tracking-tight">৳{grandTotal.toLocaleString()}</span>
+              </div>
             </div>
-            {step === 'cart' && <button onClick={() => { user ? setStep('checkout') : alert('Please log in to checkout.') }} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-full font-bold shadow-md transition">Checkout</button>}
-            {step === 'checkout' && <button onClick={() => setStep('payment')} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-full font-bold shadow-md transition">Continue to Payment</button>}
-            {step === 'payment' && <button onClick={handleCheckout} disabled={isProcessing} className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full font-bold shadow-md disabled:opacity-70 transition">{isProcessing ? 'Processing...' : `Pay ৳${cartTotal.toLocaleString()}`}</button>}
+
+            {step === 'cart' && (
+              <button
+                onClick={() => {
+                  if (!user) {
+                    closeCart();
+                    onOpenAuth();
+                  } else {
+                    setStep('checkout');
+                  }
+                }}
+                className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-full font-bold text-sm shadow-md transition"
+              >
+                {user ? 'Proceed to Checkout' : 'Sign In to Checkout'}
+              </button>
+            )}
+
+            {step === 'checkout' && (
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setStep('cart')}
+                  className="px-5 py-3.5 border border-slate-200 rounded-full text-xs font-bold text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Back
+                </button>
+                <button
+                  type="submit"
+                  form="checkout-shipping-form"
+                  className="flex-1 py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full font-bold text-sm shadow-md transition"
+                >
+                  Continue to Payment
+                </button>
+              </div>
+            )}
+
+            {step === 'payment' && (
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setStep('checkout')}
+                  className="px-5 py-3.5 border border-slate-200 rounded-full text-xs font-bold text-slate-600 hover:bg-slate-50 transition"
+                >
+                  Back
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCompleteTransaction}
+                  disabled={isProcessing}
+                  className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full font-bold text-sm shadow-md disabled:opacity-70 transition"
+                >
+                  {isProcessing ? 'Verifying Transaction...' : `Authorize & Pay ৳${grandTotal.toLocaleString()}`}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -416,7 +1075,7 @@ function CompareDrawer() {
       window.dispatchEvent(new CustomEvent('open-ai-compare', { detail: compareItems }));
       closeCompare();
     } else {
-      alert("Please select at least 2 products to compare with the AI Agent.");
+      alert('Please select at least 2 products to compare with the AI Agent.');
     }
   };
 
@@ -426,9 +1085,9 @@ function CompareDrawer() {
       <div className="relative w-full max-w-5xl bg-slate-50 h-full shadow-2xl flex flex-col transform transition-transform duration-300">
         <div className="p-4 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
           <h2 className="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-3 tracking-tight">
-            <Scale className="w-5 h-5"/> Compare <span className="text-sm font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{compareItems.length}/4</span>
+            <Scale className="w-5 h-5" /> Compare <span className="text-sm font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">{compareItems.length}/4</span>
           </h2>
-          <button onClick={closeCompare} aria-label="Close compare" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition"><X className="w-5 h-5"/></button>
+          <button onClick={closeCompare} aria-label="Close compare" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition"><X className="w-5 h-5" /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
@@ -436,13 +1095,13 @@ function CompareDrawer() {
             <div className="text-center mt-24 sm:mt-40 space-y-4 flex flex-col items-center">
               <Scale className="w-16 h-16 text-slate-300 mb-2 opacity-50" />
               <h3 className="text-2xl font-black text-slate-900 tracking-tight">No Products Selected</h3>
-              <p className="text-sm font-medium text-slate-500">Choose items from the store to compare.</p>
+              <p className="text-sm font-medium text-slate-500">Choose items from the store to compare side by side.</p>
             </div>
           ) : (
-            <div className="flex gap-4 sm:gap-6 min-h-full overflow-x-auto pb-4 custom-scrollbar snap-x snap-mandatory sm:snap-none">
+            <div className="flex gap-4 sm:gap-6 min-h-full overflow-x-auto pb-4 snap-x snap-mandatory sm:snap-none">
               {compareItems.map((product) => (
                 <div key={product.id} className="min-w-[260px] w-[82%] sm:min-w-[280px] sm:w-1/2 md:w-1/3 lg:w-1/4 snap-start bg-white rounded-2xl sm:rounded-3xl shadow-sm border border-slate-100 flex flex-col relative overflow-hidden shrink-0 hover:shadow-md transition">
-                  <button onClick={() => removeFromCompare(product.id)} aria-label={`Remove ${product.name} from compare`} className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition z-10">
+                  <button onClick={() => removeFromCompare(product.id)} aria-label={`Remove ${product.name}`} className="absolute top-3 right-3 sm:top-4 sm:right-4 p-2 bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white rounded-full transition z-10">
                     <X className="w-4 h-4" />
                   </button>
                   <div className="p-4 sm:p-6 h-44 sm:h-56 flex items-center justify-center border-b border-slate-50 bg-slate-50/50">
@@ -452,7 +1111,7 @@ function CompareDrawer() {
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">{product.brand || product.category_name}</span>
                     <h3 className="font-bold text-base text-slate-900 mb-3 line-clamp-2 tracking-tight">{product.name}</h3>
                     <p className="text-slate-900 font-black text-xl sm:text-2xl mb-6 tracking-tight">৳{Number(product.cash_discount_price || product.price || 0).toLocaleString()}</p>
-                    
+
                     <div className="mt-auto space-y-3">
                       <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Key Specs</h4>
                       <ul className="text-sm text-slate-600 space-y-2">
@@ -464,23 +1123,17 @@ function CompareDrawer() {
                   </div>
                 </div>
               ))}
-              
-              {compareItems.length < 4 && (
-                <div className="min-w-[260px] w-[82%] sm:min-w-[280px] sm:w-1/2 md:w-1/3 lg:w-1/4 snap-start bg-slate-50/50 rounded-2xl sm:rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 p-8 text-center shrink-0 hover:bg-slate-100 transition">
-                  <Search className="w-10 h-10 mb-4 opacity-50" />
-                  <p className="text-sm font-bold text-slate-500">Add another product<br/>to compare</p>
-                </div>
-              )}
             </div>
           )}
         </div>
 
         {compareItems.length > 0 && (
-          <div className="p-4 sm:p-6 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 bg-white flex gap-3 sm:gap-4 shadow-[0_-10px_40px_rgba(0,0,0,0.04)] z-10 shrink-0">
-            <button onClick={clearCompare} className="shrink-0 px-4 sm:px-6 py-3.5 sm:py-4 text-sm sm:text-base border border-slate-200 font-bold text-slate-600 rounded-full hover:bg-slate-50 transition sm:w-1/4">Clear All</button>
-            <button 
-              onClick={handleAICompare} disabled={compareItems.length < 2}
-              className="flex-1 min-w-0 px-3 py-3.5 sm:py-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-sm sm:text-base font-bold leading-tight flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition"
+          <div className="p-4 sm:p-6 border-t border-slate-100 bg-white flex gap-3 sm:gap-4 shadow-[0_-10px_40px_rgba(0,0,0,0.04)] z-10 shrink-0">
+            <button onClick={clearCompare} className="shrink-0 px-4 sm:px-6 py-3.5 text-sm border border-slate-200 font-bold text-slate-600 rounded-full hover:bg-slate-50 transition sm:w-1/4">Clear All</button>
+            <button
+              onClick={handleAICompare}
+              disabled={compareItems.length < 2}
+              className="flex-1 min-w-0 px-3 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-sm font-bold flex items-center justify-center gap-2 shadow-md disabled:opacity-50 transition"
             >
               <Sparkles className="w-5 h-5 shrink-0" /> Compare with AI Agent
             </button>
@@ -491,14 +1144,15 @@ function CompareDrawer() {
   );
 }
 
-// ============================================================================
-// PERFECTED AI ASSISTANT: Fixed Floating Positioning & Premium Send Button
-// ============================================================================
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<{role: 'user'|'ai', content: string}[]>([{ role: 'ai', content: 'Hi! I am your AuraTech AI. I can find the best products for you, answer technical questions, or compare items. How can I help?' }]);
+  const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([
+    { role: 'ai', content: 'Hi! I am your **AuraTech AI**. I can find the best products for you, answer technical questions, or compare items. How can I help?' }
+  ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const sendingRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -506,30 +1160,59 @@ const AIAssistant: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown(c => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+
+  useEffect(() => {
     const handleAICompareEvent = async (e: any) => {
+      if (sendingRef.current) return;
       const items = e.detail as Product[];
       setIsOpen(true);
-      
-      const productNames = items.map((i, idx) => `${idx + 1}. ${i.name} (Price: ৳${i.cash_discount_price || i.price})`).join(', ');
+
+      const productNames = items.map((i, idx) => `${idx + 1}. **${i.name}** (Price: ৳${i.cash_discount_price || i.price})`).join(', ');
       const userPrompt = `Compare these ${items.length} products and tell me which one is best for my needs: ${productNames}`;
-      
+
       const contextPayload = JSON.stringify({
         comparison_data: items.map(i => ({
-          name: i.name, brand: i.brand, price: i.cash_discount_price,
-          features: i.key_features, specs: i.specifications,
-          variants: i.variants, description: i.description
+          name: i.name,
+          brand: i.brand,
+          price: i.cash_discount_price,
+          features: Array.isArray(i.key_features) ? i.key_features.slice(0, 3) : [],
+          description: (i.description || '').slice(0, 150)
         }))
       });
 
+      const cacheKey = `compare::${items.map(i => i.id).sort().join('-')}::${userPrompt.toLowerCase()}`;
+      const cached = getCachedAiReply(cacheKey);
+
       setMessages(prev => [...prev, { role: 'user', content: userPrompt }]);
+
+      if (cached) {
+        setMessages(prev => [...prev, { role: 'ai', content: cached }]);
+        return;
+      }
+
+      sendingRef.current = true;
       setIsTyping(true);
       try {
-        const history = messages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.content }] }));
-        const response = await sendSupportChatMessage(history, userPrompt, contextPayload);
+        const recentHistory = messages.slice(-4).map(m => ({
+          role: m.role === 'ai' ? 'model' : 'user',
+          parts: [{ text: m.content.slice(0, 250) }]
+        }));
+        const response = await sendSupportChatMessage(recentHistory, userPrompt, contextPayload);
+        if (response.reply) {
+          setCachedAiReply(cacheKey, response.reply);
+        }
         setMessages(prev => [...prev, { role: 'ai', content: response.reply }]);
+        setCooldown(3);
       } catch {
         setMessages(prev => [...prev, { role: 'ai', content: 'Connection error while comparing.' }]);
-      } finally { setIsTyping(false); }
+      } finally {
+        setIsTyping(false);
+        sendingRef.current = false;
+      }
     };
 
     window.addEventListener('open-ai-compare', handleAICompareEvent);
@@ -537,43 +1220,65 @@ const AIAssistant: React.FC = () => {
   }, [messages]);
 
   const handleSend = async (messageText: string) => {
-    if (!messageText.trim()) return;
-    setMessages(prev => [...prev, { role: 'user', content: messageText }]);
-    setInput(''); setIsTyping(true);
+    const cleanText = messageText.trim();
+    if (!cleanText || isTyping || cooldown > 0 || sendingRef.current) return;
+
+    setMessages(prev => [...prev, { role: 'user', content: cleanText }]);
+    setInput('');
+
+    const cacheKey = `chat::${cleanText.toLowerCase()}`;
+    const cached = getCachedAiReply(cacheKey);
+    if (cached && messages.length <= 2) {
+      setMessages(prev => [...prev, { role: 'ai', content: cached }]);
+      return;
+    }
+
+    sendingRef.current = true;
+    setIsTyping(true);
 
     try {
-      const history = messages.map(m => ({ role: m.role === 'ai' ? 'model' : 'user', parts: [{ text: m.content }] }));
-      const response = await sendSupportChatMessage(history, messageText);
+      const recentHistory = messages.slice(-4).map(m => ({
+        role: m.role === 'ai' ? 'model' : 'user',
+        parts: [{ text: m.content.slice(0, 250) }]
+      }));
+      const response = await sendSupportChatMessage(recentHistory, cleanText);
+      if (response.reply) {
+        setCachedAiReply(cacheKey, response.reply);
+      }
       setMessages(prev => [...prev, { role: 'ai', content: response.reply }]);
+      setCooldown(3);
     } catch {
       setMessages(prev => [...prev, { role: 'ai', content: 'Connection error. Try again later.' }]);
-    } finally { setIsTyping(false); }
+    } finally {
+      setIsTyping(false);
+      sendingRef.current = false;
+    }
   };
 
   const quickActions = [
-    "Gaming laptop under ৳100,000",
-    "Best monitor for office work?",
-    "Help me choose a smartphone"
+    'Gaming laptop under ৳100,000',
+    'Best monitor for office work?',
+    'Help me choose a smartphone'
   ];
 
   return (
     <>
-      <button onClick={() => setIsOpen(true)} aria-label="Open AI shopping assistant" className={`fixed bottom-5 right-5 sm:bottom-8 sm:right-8 z-40 bg-indigo-600 text-white w-14 h-14 rounded-full shadow-[0_8px_30px_rgb(79,70,229,0.4)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center ${isOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'}`}>
+      <button
+        onClick={() => setIsOpen(true)}
+        aria-label="Open AI shopping assistant"
+        className={`fixed bottom-5 right-5 sm:bottom-8 sm:right-8 z-40 bg-indigo-600 text-white w-14 h-14 rounded-full shadow-[0_8px_30px_rgb(79,70,229,0.4)] transition-all duration-300 transform hover:scale-105 flex items-center justify-center ${
+          isOpen ? 'scale-0 opacity-0' : 'scale-100 opacity-100'
+        }`}
+      >
         <Sparkles className="w-6 h-6" />
       </button>
 
-      {/* 
-        FIXED AI WIDGET CONTAINER: 
-        - Mobile: `inset-x-0 bottom-0 max-w-full rounded-t-[2.5rem]` (Full-width bottom drawer)
-        - Desktop (`sm` up): `right-6 bottom-6 w-[400px] h-[550px] rounded-3xl` (Anchored floating box)
-      */}
-      <div className={`fixed z-50 bg-white shadow-2xl flex flex-col border border-slate-200 overflow-hidden transition-all duration-300 transform origin-bottom
+      <div
+        className={`fixed z-50 bg-white shadow-2xl flex flex-col border border-slate-200 overflow-hidden transition-all duration-300 transform origin-bottom
         inset-x-0 bottom-0 max-h-[85dvh] h-[85vh] rounded-t-[2.5rem]
         sm:inset-auto sm:right-6 sm:bottom-6 sm:w-[400px] sm:h-[550px] sm:rounded-3xl
         ${isOpen ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-full sm:translate-y-4 opacity-0 scale-95 pointer-events-none'}`}
       >
-        
-        {/* Header */}
         <div className="bg-slate-900 p-4 sm:p-5 flex justify-between items-center text-white shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-10 h-10 shrink-0 bg-indigo-500/20 rounded-xl flex items-center justify-center border border-indigo-500/30">
@@ -589,23 +1294,27 @@ const AIAssistant: React.FC = () => {
           </button>
         </div>
 
-        {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-4 bg-slate-50/50" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-4 bg-slate-50/50">
           {messages.map((m, idx) => (
             <div key={idx} className={`flex items-end gap-2 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
               <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mb-1 ${m.role === 'user' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-slate-200 text-indigo-600 shadow-sm'}`}>
                 {m.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
               </div>
-              <div className={`max-w-[78%] p-3.5 text-sm leading-relaxed shadow-sm break-words [overflow-wrap:anywhere] ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white text-slate-700 border border-slate-100 rounded-2xl rounded-bl-sm whitespace-pre-wrap'}`}>
-                {m.content}
+              <div className={`max-w-[78%] p-3.5 text-sm shadow-sm break-words ${m.role === 'user' ? 'bg-indigo-600 text-white rounded-2xl rounded-br-sm' : 'bg-white text-slate-700 border border-slate-100 rounded-2xl rounded-bl-sm'}`}>
+                {renderChatMarkdown(m.content, m.role === 'user')}
               </div>
             </div>
           ))}
-          
+
           {messages.length === 1 && !isTyping && (
             <div className="flex flex-col gap-2 mt-2">
               {quickActions.map((action, idx) => (
-                <button key={idx} onClick={() => handleSend(action)} className="text-xs bg-white border border-slate-200 text-slate-600 px-4 py-3 rounded-2xl shadow-sm hover:border-indigo-300 hover:text-indigo-700 transition-all text-left font-semibold">
+                <button
+                  key={idx}
+                  disabled={isTyping || cooldown > 0}
+                  onClick={() => handleSend(action)}
+                  className="text-xs bg-white border border-slate-200 text-slate-600 px-4 py-3 rounded-2xl shadow-sm hover:border-indigo-300 hover:text-indigo-700 disabled:opacity-50 transition-all text-left font-semibold"
+                >
                   {action}
                 </button>
               ))}
@@ -626,9 +1335,8 @@ const AIAssistant: React.FC = () => {
           )}
           <div ref={messagesEndRef} />
         </div>
-        
-        {/* Input Area */}
-        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white border-t border-slate-100 flex items-end gap-2.5 shrink-0">
+
+        <form onSubmit={(e) => { e.preventDefault(); handleSend(input); }} className="p-3 sm:p-4 bg-white border-t border-slate-100 flex items-end gap-2.5 shrink-0">
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -639,39 +1347,27 @@ const AIAssistant: React.FC = () => {
               }
             }}
             rows={Math.min(3, Math.max(1, input.split('\n').length))}
-            placeholder="Message AI Agent..."
+            placeholder={cooldown > 0 ? `Ready in ${cooldown}s...` : 'Message AI Agent...'}
             className="flex-1 min-w-0 bg-slate-100 border border-transparent px-4 py-3 rounded-2xl text-base sm:text-sm outline-none text-slate-700 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all resize-none leading-relaxed"
-            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
           />
-          <button type="submit" aria-label="Send message" disabled={!input.trim() || isTyping} className="bg-indigo-600 hover:bg-indigo-700 text-white w-11 h-11 rounded-2xl shadow-sm disabled:opacity-50 transition-all flex items-center justify-center shrink-0 mb-0.5">
-            <Send className="w-4 h-4 ml-0.5" />
+          <button
+            type="submit"
+            aria-label="Send message"
+            disabled={!input.trim() || isTyping || cooldown > 0}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white w-11 h-11 rounded-2xl shadow-sm disabled:opacity-50 transition-all flex items-center justify-center shrink-0 mb-0.5"
+          >
+            {cooldown > 0 ? <span className="text-[11px] font-bold">{cooldown}s</span> : <Send className="w-4 h-4 ml-0.5" />}
           </button>
         </form>
-
       </div>
     </>
   );
 };
 
-// ============================================================================
-// MOBILE MENU
-// ============================================================================
 function MobileMenu({ isOpen, onClose, categories, products }: { isOpen: boolean; onClose: () => void; categories: Category[]; products: Product[] }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useBodyScrollLock(isOpen);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    const onResize = () => { if (window.innerWidth >= 768) onClose(); };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('resize', onResize);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('resize', onResize);
-    };
-  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -687,7 +1383,7 @@ function MobileMenu({ isOpen, onClose, categories, products }: { isOpen: boolean
           <button onClick={onClose} aria-label="Close menu" className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition"><X className="w-5 h-5" /></button>
         </div>
 
-        <nav className="flex-1 overflow-y-auto overscroll-contain p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <nav className="flex-1 overflow-y-auto overscroll-contain p-3">
           <div className="px-3 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Shop By Category</div>
           <ul className="space-y-1">
             {categories.map(cat => {
@@ -704,8 +1400,6 @@ function MobileMenu({ isOpen, onClose, categories, products }: { isOpen: boolean
                       <button
                         type="button"
                         onClick={() => setExpandedId(expanded ? null : catKey)}
-                        aria-expanded={expanded}
-                        aria-label={`${expanded ? 'Hide' : 'Show'} ${cat.name} brands`}
                         className="p-3 text-slate-400 hover:text-slate-900 transition shrink-0"
                       >
                         <ChevronDown className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} />
@@ -721,11 +1415,6 @@ function MobileMenu({ isOpen, onClose, categories, products }: { isOpen: boolean
                           </Link>
                         </li>
                       ))}
-                      <li>
-                        <Link to={`/?category=${cat.slug}`} onClick={onClose} className="block px-4 py-2.5 text-xs font-black text-slate-900 uppercase tracking-widest hover:bg-slate-50 rounded-xl transition">
-                          View All
-                        </Link>
-                      </li>
                     </ul>
                   )}
                 </li>
@@ -738,9 +1427,6 @@ function MobileMenu({ isOpen, onClose, categories, products }: { isOpen: boolean
   );
 }
 
-// ============================================================================
-// CATEGORY NAV BAR
-// ============================================================================
 function CategoryNavBar({ categories, products }: { categories: Category[]; products: Product[] }) {
   const allMenu = useHoverDropdown();
 
@@ -748,40 +1434,36 @@ function CategoryNavBar({ categories, products }: { categories: Category[]; prod
     const aCount = products.filter(p => String(p.category) === String(a.id) || p.category_name === a.name).length;
     const bCount = products.filter(p => String(p.category) === String(b.id) || p.category_name === b.name).length;
     return bCount - aCount;
-  }).slice(0, 8); 
+  }).slice(0, 8);
+
+  if (categories.length === 0) return null;
 
   return (
-    <nav className="bg-white text-slate-600 border-b border-slate-200 shadow-sm sticky top-[64px] z-40 hidden md:block">
-      <div className="max-w-7xl mx-auto px-4 flex items-center h-12 text-sm font-bold relative z-50">
-        
-        <div 
-          className="h-full flex items-center relative shrink-0"
-          {...allMenu.containerProps}
-        >
+    <nav className="bg-white text-slate-600 border-b border-slate-200/80 sticky top-[64px] z-40 hidden md:block">
+      <div className="max-w-7xl mx-auto px-4 flex items-center h-11 text-xs font-bold relative z-50">
+        <div className="h-full flex items-center relative shrink-0" {...allMenu.containerProps}>
           <button
             type="button"
             onClick={allMenu.onTriggerClick}
-            aria-haspopup="true"
-            aria-expanded={allMenu.open}
-            className="flex items-center gap-2 hover:text-slate-900 px-4 py-2 transition h-9 mr-4 lg:mr-6 border border-slate-200 rounded-full bg-slate-50 hover:bg-slate-100"
+            className="flex items-center gap-2 hover:text-slate-900 px-3.5 py-1.5 transition mr-4 border border-slate-200 rounded-full bg-slate-50 hover:bg-slate-100"
           >
-            <Menu className="w-4 h-4"/> <span className="text-xs uppercase tracking-widest">All</span>
+            <Menu className="w-3.5 h-3.5" /> <span className="text-[11px] uppercase tracking-wider">Categories</span>
           </button>
 
           {allMenu.open && (
-            <div className="absolute top-[100%] left-0 bg-white border border-slate-200 shadow-2xl rounded-2xl w-72 max-w-[calc(100vw-2rem)] z-[100] mt-1 overflow-hidden flex flex-col">
-              <div className="px-6 py-4 font-black text-sm text-slate-900 border-b border-slate-100 bg-slate-50 uppercase tracking-widest">
-                Shop By Category
-              </div>
-              <ul className="max-h-[60vh] overflow-y-auto custom-scrollbar p-3 space-y-1">
+            <div className="absolute top-[100%] left-0 bg-white border border-slate-200 shadow-2xl rounded-2xl w-64 z-[100] mt-1 overflow-hidden flex flex-col">
+              <ul className="max-h-[60vh] overflow-y-auto p-2 space-y-0.5">
                 {categories.map(cat => (
                   <li key={cat.id}>
-                    <Link 
-                      to={`/?category=${cat.slug}`} 
+                    <Link
+                      to={`/?category=${cat.slug}`}
                       onClick={allMenu.close}
-                      className="block px-4 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition"
+                      className="flex items-center justify-between px-3.5 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition"
                     >
-                      {cat.name}
+                      <span>{cat.name}</span>
+                      {cat.product_count !== undefined && (
+                        <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{cat.product_count}</span>
+                      )}
                     </Link>
                   </li>
                 ))}
@@ -791,37 +1473,32 @@ function CategoryNavBar({ categories, products }: { categories: Category[]; prod
         </div>
 
         <div className="flex-1 min-w-0 flex items-center h-full gap-1 lg:gap-2 relative z-50">
-           {topCategories.map((cat, idx) => {
-             const brands = getBrandsForCategory(products, cat);
-             const visibility = idx < 3 ? 'flex' : idx < 6 ? 'hidden lg:flex' : 'hidden xl:flex';
-             return (
-               <div key={cat.id} className={`group/nav h-full items-center relative ${visibility}`}>
-                 <Link to={`/?category=${cat.slug}`} className="hover:text-slate-900 hover:bg-slate-50 px-3 py-1.5 rounded-full transition whitespace-nowrap flex items-center gap-1.5">
-                   {cat.name}
-                   {brands.length > 0 && <ChevronDown className="w-3 h-3 text-slate-400 group-hover/nav:text-slate-600 transition" />}
-                 </Link>
-                 
-                 {brands.length > 0 && (
-                    <div className="absolute hidden group-hover/nav:flex flex-col top-[100%] left-0 mt-1 bg-white border border-slate-200 shadow-2xl rounded-2xl w-56 z-[100] overflow-hidden">
-                      <ul className="max-h-[60vh] overflow-y-auto custom-scrollbar p-3 space-y-1">
-                        {brands.map((brand, idx) => (
-                          <li key={idx}>
-                            <Link to={`/?search=${encodeURIComponent(brand)}`} className="block px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition line-clamp-1">
-                              {brand}
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
-                      <div className="bg-slate-50 border-t border-slate-100 p-3 mt-auto">
-                        <Link to={`/?category=${cat.slug}`} className="block w-full py-3 text-center text-xs font-black text-slate-900 hover:text-white bg-white hover:bg-slate-900 border border-slate-200 rounded-xl transition uppercase tracking-widest shadow-sm">
-                          View All
-                        </Link>
-                      </div>
-                    </div>
-                 )}
-               </div>
-             );
-           })}
+          {topCategories.map((cat, idx) => {
+            const brands = getBrandsForCategory(products, cat);
+            const visibility = idx < 4 ? 'flex' : idx < 6 ? 'hidden lg:flex' : 'hidden xl:flex';
+            return (
+              <div key={cat.id} className={`group/nav h-full items-center relative ${visibility}`}>
+                <Link to={`/?category=${cat.slug}`} className="hover:text-slate-900 hover:bg-slate-50 px-3 py-1.5 rounded-full transition whitespace-nowrap flex items-center gap-1">
+                  {cat.name}
+                  {brands.length > 0 && <ChevronDown className="w-3 h-3 text-slate-400 group-hover/nav:text-slate-600 transition" />}
+                </Link>
+
+                {brands.length > 0 && (
+                  <div className="absolute hidden group-hover/nav:flex flex-col top-[100%] left-0 mt-1 bg-white border border-slate-200 shadow-2xl rounded-2xl w-52 z-[100] overflow-hidden">
+                    <ul className="max-h-[50vh] overflow-y-auto p-2 space-y-0.5">
+                      {brands.map((brand, bIdx) => (
+                        <li key={bIdx}>
+                          <Link to={`/?search=${encodeURIComponent(brand)}`} className="block px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 rounded-xl transition truncate">
+                            {brand}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </nav>
@@ -832,10 +1509,10 @@ function NavigationHeader({ user, onLogout, onOpenAuth, onOpenMenu }: { user: Us
   const { cartItems, openCart } = useCart();
   const { wishlistItems } = useWishlist();
   const { compareItems, openCompare } = useCompare();
-  
+
   const cartItemCount = cartItems.reduce((acc, item) => acc + item.quantity, 0);
   const wishlistCount = wishlistItems.length;
-  
+
   const [searchTerm, setSearchTerm] = useState('');
   const [suggestions, setSuggestions] = useState<Product[]>([]);
   const [isFocused, setIsFocused] = useState(false);
@@ -849,8 +1526,12 @@ function NavigationHeader({ user, onLogout, onOpenAuth, onOpenMenu }: { user: Us
         try {
           const results = await fetchProducts(undefined, searchTerm.trim());
           setSuggestions(results.slice(0, 5));
-        } catch (err) { setSuggestions([]); }
-      } else { setSuggestions([]); }
+        } catch {
+          setSuggestions([]);
+        }
+      } else {
+        setSuggestions([]);
+      }
     }, 250);
     return () => clearTimeout(handler);
   }, [searchTerm]);
@@ -871,118 +1552,113 @@ function NavigationHeader({ user, onLogout, onOpenAuth, onOpenMenu }: { user: Us
     }
   };
 
-  const avatarDisplay = user?.avatar_url ? `http://127.0.0.1:8000${user.avatar_url}` : null;
+  const avatarDisplay = user?.avatar_url
+    ? (user.avatar_url.startsWith('http') ? user.avatar_url : `http://127.0.0.1:8000${user.avatar_url}`)
+    : null;
 
   return (
-    <header className="bg-white/90 backdrop-blur-xl border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+    <header className="bg-white/95 backdrop-blur-xl border-b border-slate-200/80 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2.5 md:py-0 md:h-16 flex flex-wrap md:flex-nowrap items-center justify-between gap-x-2 sm:gap-x-4 lg:gap-x-8 gap-y-2.5">
-        
         <div className="flex items-center gap-1 sm:gap-3 shrink-0">
           <button onClick={onOpenMenu} aria-label="Open categories menu" className="md:hidden -ml-2 p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-full transition">
             <Menu className="w-6 h-6" />
           </button>
-          <Link to="/" className="flex items-center gap-2 sm:gap-3 shrink-0 group">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-lg sm:text-xl shadow-md group-hover:scale-105 transition-transform">AT</div>
-            <div className="hidden min-[400px]:block"><h1 className="font-black text-xl text-slate-900 tracking-tight leading-none">AuraTech</h1><span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Smart Store</span></div>
+          <Link to="/" className="flex items-center gap-2.5 shrink-0 group">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white font-black text-lg shadow-sm group-hover:scale-105 transition-transform">AT</div>
+            <div className="hidden min-[400px]:block">
+              <h1 className="font-black text-xl text-slate-900 tracking-tight leading-none">AuraTech</h1>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Curated Tech</span>
+            </div>
           </Link>
         </div>
-        
-        <div ref={searchRef} className="order-last basis-full min-w-0 md:order-none md:basis-auto md:flex-1 md:max-w-2xl relative">
+
+        <div ref={searchRef} className="order-last basis-full min-w-0 md:order-none md:basis-auto md:flex-1 md:max-w-xl relative">
           <form onSubmit={handleSearchSubmit} className="relative flex items-center">
-            <input 
-              type="text" 
+            <input
+              type="text"
               enterKeyHint="search"
-              placeholder="Search curated tech..." 
+              placeholder="Search products, brands, or SKU..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onFocus={() => setIsFocused(true)}
-              className="w-full py-2.5 pl-5 pr-12 rounded-full bg-slate-50 border border-slate-200 text-slate-900 text-base md:text-sm font-medium focus:outline-none focus:border-slate-900 focus:bg-white transition shadow-sm"
+              className="w-full py-2.5 pl-4 pr-11 rounded-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-medium focus:outline-none focus:border-slate-900 focus:bg-white transition"
             />
-            <button type="submit" aria-label="Search" className="absolute right-2 p-1.5 bg-slate-900 text-white rounded-full hover:bg-slate-800 transition">
+            <button type="submit" aria-label="Search" className="absolute right-1.5 p-1.5 bg-slate-900 text-white rounded-full hover:bg-slate-800 transition">
               <Search className="w-4 h-4" />
             </button>
           </form>
 
           {isFocused && suggestions.length > 0 && (
-            <div className="absolute top-[100%] left-0 right-0 mt-3 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-100 overflow-hidden z-50 py-3 max-h-[70vh] overflow-y-auto overscroll-contain">
-              <div className="px-4 sm:px-6 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest border-b border-slate-50">Top Matches</div>
+            <div className="absolute top-[100%] left-0 right-0 mt-2 bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden z-50 py-2 max-h-[70vh] overflow-y-auto">
               {suggestions.map((product) => (
-                <div 
+                <div
                   key={product.id}
                   onClick={() => {
-                    setIsFocused(false); setSearchTerm('');
+                    setIsFocused(false);
+                    setSearchTerm('');
                     navigate(`/product/${product.id}/${slugify(product.name)}`);
                   }}
-                  className="px-4 sm:px-6 py-3 sm:py-4 hover:bg-slate-50 transition flex items-center gap-3 sm:gap-4 cursor-pointer border-b border-slate-50 last:border-0"
+                  className="px-4 py-3 hover:bg-slate-50 transition flex items-center gap-3.5 cursor-pointer border-b border-slate-50 last:border-0"
                 >
-                  <img src={product.image_display_url || product.image_url} alt={product.name} className="w-12 h-12 object-contain rounded-xl border border-slate-100 bg-white p-1 shrink-0" />
+                  <img src={product.image_display_url || product.image_url} alt={product.name} className="w-11 h-11 object-contain rounded-xl border border-slate-100 bg-white p-1 shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-sm text-slate-900 truncate tracking-tight">{product.name}</h4>
-                    <p className="text-xs font-medium text-slate-500 truncate">{product.brand || product.category_name}</p>
+                    <h4 className="font-bold text-xs text-slate-900 truncate">{product.name}</h4>
+                    <p className="text-[11px] font-medium text-slate-400 truncate">{product.brand || product.category_name}</p>
                   </div>
-                  <span className="font-black text-sm text-slate-900 shrink-0">৳{Number(product.cash_discount_price || product.price || 0).toLocaleString()}</span>
+                  <span className="font-black text-xs text-slate-900 shrink-0">৳{Number(product.cash_discount_price || product.price || 0).toLocaleString()}</span>
                 </div>
               ))}
-              <div className="p-3 bg-slate-50 border-t border-slate-100">
-                <div onClick={() => { setIsFocused(false); navigate(`/?search=${encodeURIComponent(searchTerm.trim())}`); }} className="px-4 py-3 bg-white border border-slate-200 hover:border-slate-900 hover:bg-slate-900 hover:text-white rounded-2xl text-center text-xs font-bold text-slate-900 cursor-pointer transition uppercase tracking-widest shadow-sm">
-                  View all results
-                </div>
-              </div>
             </div>
           )}
         </div>
 
-        <div className="flex items-center gap-0.5 sm:gap-2 md:gap-3 lg:gap-4 shrink-0">
-          
-          <button onClick={openCompare} aria-label="Open compare" className="relative p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+          <button onClick={openCompare} aria-label="Open compare" className="relative p-2 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full transition">
             <Scale className="w-5 h-5" />
             {compareItems.length > 0 && <span className="absolute top-0 right-0 bg-slate-900 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">{compareItems.length}</span>}
           </button>
 
-          <button onClick={() => navigate('/dashboard')} aria-label="Open wishlist" className="relative p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-full transition">
+          <button onClick={() => navigate('/dashboard')} aria-label="Open wishlist" className="relative p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-full transition">
             <Bookmark className="w-5 h-5" />
             {wishlistCount > 0 && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">{wishlistCount}</span>}
           </button>
 
-          <button onClick={openCart} aria-label="Open shopping bag" className="relative p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition sm:mr-2">
+          <button onClick={openCart} aria-label="Open shopping bag" className="relative p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition sm:mr-1">
             <ShoppingCart className="w-5 h-5" />
             {cartItemCount > 0 && <span className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center ring-2 ring-white">{cartItemCount}</span>}
           </button>
 
-          <div className="hidden sm:block h-6 w-px bg-slate-200"></div>
+          <div className="hidden sm:block h-5 w-px bg-slate-200 mx-1"></div>
 
           {user ? (
-            <div {...userMenu.containerProps} className="relative py-1 sm:py-2 sm:pl-2">
+            <div {...userMenu.containerProps} className="relative py-1">
               <button
                 type="button"
                 onClick={userMenu.onTriggerClick}
-                aria-haspopup="menu"
-                aria-expanded={userMenu.open}
-                aria-label="Account menu"
-                className="flex items-center gap-2 text-left cursor-pointer"
+                className="flex items-center gap-2 text-left cursor-pointer pl-1 pr-2 py-1 rounded-full hover:bg-slate-50 transition"
               >
-                <div className="w-9 h-9 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden shrink-0">
+                <div className="w-8 h-8 rounded-full border border-slate-200 bg-slate-100 flex items-center justify-center overflow-hidden shrink-0">
                   {avatarDisplay ? (
                     <img src={avatarDisplay} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
-                    <User className="w-5 h-5 text-slate-400" />
+                    <User className="w-4 h-4 text-slate-500" />
                   )}
                 </div>
-                <div className="hidden lg:flex flex-col min-w-0"><span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Account</span><span className="text-sm font-bold text-slate-900 leading-tight max-w-[10rem] truncate">{user.username}</span></div>
+                <span className="hidden lg:inline text-xs font-bold text-slate-900 max-w-[8rem] truncate">{user.name || user.username}</span>
               </button>
-              
-              <div className={`absolute top-full right-0 w-56 max-w-[calc(100vw-1.5rem)] bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-slate-100 transition-all flex flex-col py-3 z-50 ${userMenu.open ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
-                <Link to="/dashboard" onClick={userMenu.close} className="px-5 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-3 transition"><User className="w-4 h-4"/> Dashboard</Link>
-                {user.is_staff && <Link to="/admin" onClick={userMenu.close} className="px-5 py-3 text-sm font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-3 transition"><Shield className="w-4 h-4"/> Admin Console</Link>}
-                <div className="border-t border-slate-100 my-2"></div>
-                <button onClick={() => { userMenu.close(); onLogout(); }} className="w-full px-5 py-3 text-sm font-semibold text-rose-500 hover:text-rose-600 hover:bg-rose-50 flex items-center gap-3 transition"><LogOut className="w-4 h-4"/> Sign Out</button>
+
+              <div className={`absolute top-full right-0 w-52 bg-white rounded-2xl shadow-xl border border-slate-100 transition-all flex flex-col py-2 z-50 ${userMenu.open ? 'opacity-100 visible' : 'opacity-0 invisible'}`}>
+                <Link to="/dashboard" onClick={userMenu.close} className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:text-slate-900 hover:bg-slate-50 flex items-center gap-2.5 transition"><User className="w-4 h-4" /> My Account & Orders</Link>
+                {user.is_staff && <Link to="/admin" onClick={userMenu.close} className="px-4 py-2.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50 flex items-center gap-2.5 transition"><Shield className="w-4 h-4" /> Admin Console</Link>}
+                <div className="border-t border-slate-100 my-1"></div>
+                <button onClick={() => { userMenu.close(); onLogout(); }} className="w-full px-4 py-2.5 text-xs font-bold text-rose-500 hover:bg-rose-50 flex items-center gap-2.5 transition"><LogOut className="w-4 h-4" /> Sign Out</button>
               </div>
             </div>
           ) : (
-            <div onClick={onOpenAuth} role="button" tabIndex={0} aria-label="Sign in" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpenAuth(); } }} className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 sm:pl-2 sm:pr-4 sm:py-1.5 rounded-full border border-transparent hover:border-slate-200 transition">
-              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center"><User className="w-4 h-4 text-slate-500" /></div>
-              <span className="text-sm font-bold text-slate-900 hidden sm:inline">Sign In</span>
-            </div>
+            <button onClick={onOpenAuth} className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-full text-xs font-bold transition shadow-sm">
+              <User className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
           )}
         </div>
       </div>
@@ -992,32 +1668,47 @@ function NavigationHeader({ user, onLogout, onOpenAuth, onOpenMenu }: { user: Us
 
 function Footer() {
   return (
-    <footer className="bg-slate-950 text-slate-400 pt-12 sm:pt-20 pb-8 sm:pb-10 mt-auto border-t border-slate-900">
-      <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 sm:gap-12 mb-10 sm:mb-16">
-        <div className="space-y-4">
-          <h3 className="text-white font-bold tracking-widest uppercase text-xs mb-4 sm:mb-6">AuraTech Premium</h3>
-          <p className="text-sm font-medium leading-relaxed">The next generation of e-commerce. Powered by intelligent curation and premium design.</p>
+    <footer className="bg-white text-slate-500 py-12 mt-auto border-t border-slate-200/80">
+      <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-8 mb-8">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 bg-slate-900 rounded-lg flex items-center justify-center text-white font-black text-xs">AT</div>
+            <span className="font-black text-slate-900 tracking-tight">AuraTech</span>
+          </div>
+          <p className="text-xs leading-relaxed text-slate-500">
+            Minimalist, AI-powered technology retail. Authentic hardware, transparent pricing, and fast nationwide delivery.
+          </p>
         </div>
         <div>
-          <h3 className="text-white font-bold tracking-widest uppercase text-xs mb-4 sm:mb-6">Explore</h3>
-          <ul className="space-y-3 sm:space-y-4 text-sm font-medium">
-            <li><Link to="/" className="hover:text-white transition inline-block py-0.5">Latest Releases</Link></li>
-            <li><Link to="/" className="hover:text-white transition inline-block py-0.5">Tech Journal</Link></li>
-            <li><Link to="/" className="hover:text-white transition inline-block py-0.5">Privacy & Terms</Link></li>
+          <h3 className="text-slate-900 font-bold tracking-wider uppercase text-[11px] mb-3">Navigation</h3>
+          <ul className="space-y-2 text-xs font-medium">
+            <li><Link to="/" className="hover:text-slate-900 transition">Home Highlights</Link></li>
+            <li><Link to="/?view=all" className="hover:text-slate-900 transition">Browse Catalog</Link></li>
+            <li><Link to="/dashboard" className="hover:text-slate-900 transition">Order Tracking</Link></li>
           </ul>
         </div>
-        <div className="sm:col-span-2">
-          <h3 className="text-white font-bold tracking-widest uppercase text-xs mb-4 sm:mb-6">Contact & Support</h3>
-          <div className="flex flex-col sm:flex-row gap-6">
-            <div className="bg-slate-900/50 border border-slate-800 p-4 sm:p-6 rounded-2xl flex items-center gap-4 hover:border-slate-700 transition cursor-pointer">
-              <Phone className="w-6 h-6 text-white shrink-0" />
-              <div><p className="text-xs text-slate-500 uppercase tracking-widest font-bold mb-1">Concierge Line</p><p className="text-lg font-bold text-white">16793</p></div>
+        <div>
+          <h3 className="text-slate-900 font-bold tracking-wider uppercase text-[11px] mb-3">Customer Care</h3>
+          <ul className="space-y-2 text-xs font-medium">
+            <li>Official Warranty Coverage</li>
+            <li>Easy 7-Day Replacement</li>
+            <li>PCI-Compliant Checkout</li>
+          </ul>
+        </div>
+        <div>
+          <h3 className="text-slate-900 font-bold tracking-wider uppercase text-[11px] mb-3">Concierge Support</h3>
+          <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl flex items-center gap-3">
+            <Phone className="w-5 h-5 text-slate-900 shrink-0" />
+            <div>
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">Hotline (10AM - 8PM)</p>
+              <p className="text-sm font-black text-slate-900">16793 / +880 1700-000000</p>
             </div>
           </div>
         </div>
       </div>
-      <div className="max-w-7xl mx-auto px-4 pt-8 border-t border-slate-900 text-xs font-medium text-slate-600 flex justify-between">
-        <p>© 2026 AuraTech Inc. All rights reserved.</p>
+      <div className="max-w-7xl mx-auto px-4 pt-6 border-t border-slate-100 text-xs text-slate-400 flex flex-col sm:flex-row justify-between gap-2">
+        <p>© 2026 AuraTech. All rights reserved.</p>
+        <p>Engineered with AI Product Intelligence</p>
       </div>
     </footer>
   );
@@ -1032,24 +1723,31 @@ export function App() {
   const openMenu = useCallback(() => setIsMenuOpen(true), []);
   const closeMenu = useCallback(() => setIsMenuOpen(false), []);
 
-  const loadProfile = () => {
+  const loadProfile = useCallback(() => {
     fetchProfile().then((data) => setUser(data)).catch(() => setUser(null));
-  };
+  }, []);
 
-  useEffect(() => { loadProfile(); }, []);
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   return (
     <WishlistProvider>
       <CartProvider>
         <CompareProvider>
           <Router>
-            <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans w-full max-w-[100vw] overflow-x-hidden">
-              <NavigationHeader user={user} onLogout={() => { logoutUser().then(() => window.location.href = '/'); }} onOpenAuth={() => setIsAuthOpen(true)} onOpenMenu={openMenu} />
+            <div className="min-h-screen bg-slate-50/60 text-slate-900 flex flex-col font-sans w-full max-w-[100vw] overflow-x-hidden">
+              <NavigationHeader
+                user={user}
+                onLogout={() => { logoutUser().then(() => { setUser(null); window.location.href = '/'; }); }}
+                onOpenAuth={() => setIsAuthOpen(true)}
+                onOpenMenu={openMenu}
+              />
               <CategoryNavBar categories={categories} products={products} />
-              
+
               <MobileMenu isOpen={isMenuOpen} onClose={closeMenu} categories={categories} products={products} />
               <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} onSuccess={() => { setIsAuthOpen(false); loadProfile(); }} />
-              <CartDrawer user={user} />
+              <CartDrawer user={user} onOpenAuth={() => setIsAuthOpen(true)} />
               <CompareDrawer />
               <AIAssistant />
 
@@ -1060,6 +1758,7 @@ export function App() {
                   <Route path="/product/:id/:slug" element={<ProductDetailPageWrapper />} />
                   <Route path="/dashboard" element={<CustomerDashboard user={user} onProfileUpdate={loadProfile} />} />
                   <Route path="/admin" element={<AdminDashboard />} />
+                  <Route path="/auth" element={<AuthPage onLoginSuccess={loadProfile} />} />
                 </Routes>
               </main>
               <Footer />

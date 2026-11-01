@@ -11,15 +11,15 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
   const [customerPhone, setCustomerPhone] = useState('');
   const [shippingAddress, setShippingAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'bkash' | 'card'>('cod');
-  
+
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const open = isOpen || isCartOpen;
-  const handleClose = () => { 
-    closeCart(); 
-    onClose?.(); 
+  const handleClose = () => {
+    closeCart();
+    onClose?.();
     if (orderSuccess) {
       setOrderSuccess(false);
       setCustomerName('');
@@ -28,29 +28,33 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
       setShippingAddress('');
     }
   };
-  
+
   const totalAmount = cartItems.reduce((total, item) => total + (Number(item.product.cash_discount_price || item.product.price || 0) * item.quantity), 0);
 
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     if (!customerName || !customerEmail || cartItems.length === 0) return;
-    
+
     setIsSubmitting(true);
     try {
       await createOrder({
         shipping: {
           name: customerName,
+          email: customerEmail,
           address: shippingAddress,
           phone: customerPhone
         },
         payment_method: paymentMethod,
-        items: cartItems.map((i) => ({ product_id: i.product.id, quantity: i.quantity })),
+        items: cartItems.map((i) => ({
+          product_id: i.product.id,
+          quantity: i.quantity,
+          selected_variants: i.selectedVariants || {}
+        })),
       });
       clearCart();
       setOrderSuccess(true);
     } catch (err: any) {
-      console.error(err);
       setErrorMsg(err.response?.data?.error || 'Failed to process checkout. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -79,7 +83,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
             >
               <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white">
                 <h2 className="text-xl font-black tracking-tight text-slate-900 flex items-center gap-3">
-                  <ShoppingBag className="w-5 h-5"/> Your Bag
+                  <ShoppingBag className="w-5 h-5" /> Your Bag
                 </h2>
                 <button onClick={handleClose} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-full transition">
                   <X className="w-5 h-5" />
@@ -92,7 +96,9 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                     <CheckCircle className="w-10 h-10 text-emerald-500" />
                   </div>
                   <h3 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Order Confirmed!</h3>
-                  <p className="text-slate-500 text-base leading-relaxed mb-8">Thank you for your purchase. We've sent a receipt to <span className="font-bold text-slate-700">{customerEmail}</span>.</p>
+                  <p className="text-slate-500 text-base leading-relaxed mb-8">
+                    Thank you for your purchase. We have recorded your order for <span className="font-bold text-slate-700">{customerEmail}</span>.
+                  </p>
                   <button
                     onClick={handleClose}
                     className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3.5 rounded-full font-bold text-sm shadow-md transition w-full"
@@ -105,7 +111,7 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                   <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-slate-50/50">
                     {cartItems.length === 0 ? (
                       <div className="text-center py-20 text-slate-400 flex flex-col items-center">
-                        <ShoppingBag className="w-12 h-12 mb-4 opacity-50"/>
+                        <ShoppingBag className="w-12 h-12 mb-4 opacity-50" />
                         <p className="font-bold text-slate-500">Your bag is empty.</p>
                       </div>
                     ) : (
@@ -157,11 +163,11 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
 
                       {errorMsg && (
                         <div className="p-3 bg-rose-50 text-rose-600 text-xs font-bold rounded-xl flex items-center gap-2 border border-rose-100">
-                          <AlertCircle className="w-4 h-4 shrink-0"/> {errorMsg}
+                          <AlertCircle className="w-4 h-4 shrink-0" /> {errorMsg}
                         </div>
                       )}
 
-                      <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-1 custom-scrollbar">
+                      <div className="space-y-3 max-h-[30vh] overflow-y-auto pr-1">
                         <input
                           type="text"
                           placeholder="Full Name"
@@ -194,11 +200,11 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void }> = ({
                           rows={2}
                           className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm focus:outline-none focus:border-slate-900 transition resize-none"
                         />
-                        
+
                         <div className="pt-2">
                           <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Payment Method</label>
-                          <select 
-                            value={paymentMethod} 
+                          <select
+                            value={paymentMethod}
                             onChange={(e) => setPaymentMethod(e.target.value as any)}
                             className="w-full p-3.5 border border-slate-200 rounded-2xl bg-slate-50 focus:bg-white text-sm font-bold focus:outline-none focus:border-slate-900 transition"
                           >

@@ -17,7 +17,6 @@ export const CompareProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [compareItems, setCompareItems] = useState<Product[]>([]);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
 
-  // Load from local storage on mount
   useEffect(() => {
     const stored = localStorage.getItem('aura_compare');
     if (stored) {
@@ -29,24 +28,22 @@ export const CompareProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
-  // Save to local storage on change
   useEffect(() => {
     localStorage.setItem('aura_compare', JSON.stringify(compareItems));
   }, [compareItems]);
 
   const addToCompare = (product: Product) => {
-    // Prevent adding duplicates
     if (compareItems.some(item => item.id === product.id)) {
-      alert('This product is already in your comparison list.');
+      setIsCompareOpen(true);
       return;
     }
-    
-    // Expanded Limit for Multi-Product AI Analysis
+
     if (compareItems.length >= 4) {
       alert('You can compare a maximum of 4 products at a time to ensure optimal AI accuracy.');
+      setIsCompareOpen(true);
       return;
     }
-    
+
     setCompareItems(prev => [...prev, product]);
     setIsCompareOpen(true);
   };

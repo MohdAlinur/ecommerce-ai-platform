@@ -30,14 +30,64 @@ api.interceptors.request.use((config) => {
     if (csrfToken) {
       config.headers['X-CSRFToken'] = csrfToken;
     }
+    // Clear short GET cache whenever any mutation happens
+    shortGetCache.clear();
   }
   return config;
 }, (error) => {
   return Promise.reject(error);
 });
 
-export const fetchProducts = (categorySlug?: string, search?: string) =>
-  api.get('/products/', { params: { category: categorySlug, search } }).then(res => res.data);
+// ============================================================================
+// IN-FLIGHT REQUEST DEDUPLICATOR & 2-SECOND BURST CACHE
+// Prevents App.tsx + StorePage.tsx + React StrictMode from firing 4 identical
+// 403KB GET /api/products/ calls simultaneously on page load.
+// ============================================================================
+const inFlightRequests = new Map<string, Promise<any>>();
+const shortGetCache = new Map<string, { data: any; timestamp: number }>();
+const BURST_TTL_MS = 2500;
+
+function deduplicatedGet(url: string, params?: Record<string, any>): Promise<any> {
+  const key = `${url}::${JSON.stringify(params || {})}`;
+  const now = Date.now();
+
+  const cached = shortGetCache.get(key);
+  if (cached && now - cached.timestamp < BURST_TTL_MS) {
+    return Promise.resolve(cached.data);
+  }
+
+  const existingPromise = inFlightRequests.get(key);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const reqPromise = api
+    .get(url, { params })
+    .then(res => {
+      shortGetCache.set(key, { data: res.data, timestamp: Date.now() });
+      inFlightRequests.delete(key);
+      return res.data;
+    })
+    .catch(err => {
+      inFlightRequests.delete(key);
+      throw err;
+    });
+
+  inFlightRequests.set(key, reqPromise);
+  return reqPromise;
+}
+
+export const fetchProducts = (categorySlug?: string, search?: string, ordering?: string) =>
+  deduplicatedGet('/products/', { category: categorySlug, search, ordering });
+
+export const fetchStoreHighlights = () =>
+  deduplicatedGet('/store-highlights/');
+
+export const fetchCategories = () =>
+  deduplicatedGet('/categories/');
+
+export const fetchProfile = () =>
+  deduplicatedGet('/auth/profile/');
 
 export const createProduct = (formData: FormData) =>
   api.post('/products/', formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => res.data);
@@ -45,9 +95,10 @@ export const createProduct = (formData: FormData) =>
 export const updateProduct = (id: number, formData: FormData) =>
   api.put(`/products/${id}/`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }).then(res => res.data);
 
-export const deleteProduct = (id: number) => api.delete(`/products/${id}/`).then(res => res.data);
+export const patchProduct = (id: number, data: Record<string, unknown>) =>
+  api.patch(`/products/${id}/`, data).then(res => res.data);
 
-export const fetchCategories = () => api.get('/categories/').then(res => res.data);
+export const deleteProduct = (id: number) => api.delete(`/products/${id}/`).then(res => res.data);
 
 export const createCategory = (name: string) => api.post('/categories/', { name }).then(res => res.data);
 
@@ -62,15 +113,13 @@ export const cancelCustomerOrder = (orderId: number) => api.post(`/orders/${orde
 export const validateDiscountCode = (code: string, subtotal: number) =>
   api.post('/discounts/validate/', { code, subtotal }).then(res => res.data);
 
-export const loginUser = (credentials: { email?: string; phone?: string; identifier?: string; password?: string }) =>
+export const loginUser = (credentials: { email?: string; phone?: string; identifier?: string; username?: string; password?: string }) =>
   api.post('/auth/login/', credentials).then(res => res.data);
 
-export const signupUser = (userData: { name: string; phone: string; email: string; password?: string }) =>
+export const signupUser = (userData: { name: string; phone: string; email: string; password?: string; shipping_address?: string }) =>
   api.post('/auth/signup/', userData).then(res => res.data);
 
 export const logoutUser = () => api.post('/auth/logout/').then(res => res.data);
-
-export const fetchProfile = () => api.get('/auth/profile/').then(res => res.data);
 
 export const updateProfile = (data: FormData | Record<string, unknown>) => {
   const isFormData = data instanceof FormData;
