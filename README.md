@@ -1,133 +1,98 @@
-# 🛍️ E-Commerce AI Platform
+# E-Commerce AI Platform
 
-A full-stack AI-powered e-commerce platform built with Django REST Framework on the backend and React + TypeScript on the frontend. The app includes product browsing, shopping cart, checkout, customer authentication, AI product analysis, AI customer support, admin management, and sales analytics.
+A full-stack storefront and store-management application for AuraTech Bangladesh. The project pairs a React and TypeScript frontend with a Django REST API and includes catalog browsing, customer accounts, ordering, discounts, AI-assisted shopping, and admin tools.
 
----
+## Features
 
-## ✨ What This Project Includes
+- Browse and search products, filter by category, and view product details, variants, images, stock, and reviews.
+- Use a shopping cart, wishlist, and product comparison; create orders with shipping details, discount codes, and the available payment-method options (cash on delivery, bKash, Nagad, or card).
+- Create an account, sign in, manage a customer profile, and review or cancel orders.
+- Ask the AI shopping assistant questions using product and store context; request AI analysis of product reviews.
+- Manage catalog items, categories, users, discounts, and orders from the admin dashboard; import or delete products in bulk and review store analytics.
+- Maintain product media and customer avatars in Django's media directory.
 
-- Product catalog with categories, pricing, stock, reviews, and product media
-- Shopping cart and checkout flow with multiple payment methods
-- Customer signup/login with profile handling
-- AI-powered product review analysis using Gemini
-- AI customer support chat integrated with store context
-- Admin dashboard for product management, user administration, and analytics
-- CSV bulk product import and bulk product deletion
-- Promo banners and discount code management
-- Responsive storefront and dashboard UI
+Payment options are recorded by the application, but the backend does not integrate a payment gateway. The AI assistant can use configured external model providers; provider access requires API keys.
 
----
-
-## 🏗️ Project Structure
+## Project layout
 
 ```text
- ecommerce-ai-platform/
+.
 ├── backend/
-│   ├── api/
-│   ├── core/
-│   ├── media/
+│   ├── api/              # Models, serializers, API views, and migrations
+│   ├── core/             # Django settings and URL configuration
+│   ├── media/            # Uploaded product images and avatars
 │   ├── manage.py
-│   ├── pyproject.toml
-│   └── README.md
+│   └── pyproject.toml
 ├── frontend/
 │   ├── src/
-│   ├── public/
+│   │   ├── components/   # Store UI, account/auth, cart, and AI chat
+│   │   ├── context/      # Cart, wishlist, and compare state
+│   │   └── pages/        # Store, product, customer, auth, and admin views
 │   ├── package.json
-│   ├── vite.config.ts
-│   └── README.md
-├── README.md
-├── main.py
-└── pyproject.toml
+│   └── vite.config.ts
+└── README.md
 ```
 
-### Backend
+## Technology
 
-The backend is a Django project under `backend/` and exposes REST APIs for:
+- **Backend:** Python 3.14+, Django 6.1, Django REST Framework, PostgreSQL, and Django session authentication.
+- **Frontend:** React 19, TypeScript, Vite 8, React Router, Tailwind CSS, Axios, Recharts, and Lucide.
+- **AI:** Gemini and OpenAI-compatible provider integrations, selected through the backend AI service.
+- **Package tools:** `uv` for Python projects and npm for the frontend.
 
-- authentication and user profiles
-- products and categories
-- reviews and orders
-- banners and discount codes
-- AI content generation and support chat
-- admin analytics and management actions
+## Requirements
 
-### Frontend
+- Python 3.14 or newer and [`uv`](https://docs.astral.sh/uv/)
+- Node.js and npm (use a version supported by Vite 8)
+- PostgreSQL
+- API keys for any AI provider you want to enable (optional for non-AI storefront features)
 
-The frontend is a Vite React application under `frontend/` with a storefront, customer dashboard, admin dashboard, cart drawer, AI chat modal, and product detail pages.
+The Django settings use PostgreSQL by default. Create a database named `ecommerce_ai_db` (or configure another name) before starting the backend. The checked-in `backend/db.sqlite3` is not selected by the current settings.
 
----
+### Backend dependency manifest note
 
-## 🛠️ Tech Stack
+Before setting up a clean Python environment, reconcile `backend/pyproject.toml` with the imports used by the source. It currently does not declare Django REST Framework, `django-cors-headers`, `python-dotenv`, a PostgreSQL driver, or `google-genai`; the AI service imports `google.genai`, which is not provided by the declared `google-generativeai` package. As a result, `uv sync` from the current manifest alone may not produce a runnable backend environment.
 
-### Backend
+## Configuration
 
-- Python
-- Django
-- Django REST Framework
-- PostgreSQL (configured in project settings)
-- Google Gemini API for AI features
-- Pillow for image handling
-- `uv` for Python package management
-
-### Frontend
-
-- React 19
-- TypeScript
-- Vite
-- React Router
-- Tailwind CSS
-- Axios
-- Recharts
-- Lucide React
-
----
-
-## ✅ Prerequisites
-
-Before starting the project, make sure you have:
-
-- Python 3.10+ (the project currently declares Python 3.14 in its backend config, so a matching version is recommended)
-- Node.js and npm
-- PostgreSQL running locally
-- Astral `uv` installed
-
-Install `uv` if needed:
-
-```bash
-pip install uv
-```
-
----
-
-## ⚙️ Environment Setup
-
-Create a `.env` file inside the `backend/` directory with values similar to:
+Create `backend/.env` and set the database values and a Django secret:
 
 ```env
-DJANGO_SECRET_KEY=your-secret-key
-GEMINI_API_KEY=your-google-gemini-api-key
+DJANGO_SECRET_KEY=replace-with-a-long-random-secret
 DEBUG=True
 ALLOWED_HOSTS=localhost,127.0.0.1
+
 DB_NAME=ecommerce_ai_db
 DB_USER=postgres
-DB_PASSWORD=postgres
+DB_PASSWORD=your-postgres-password
 DB_HOST=localhost
 DB_PORT=5432
 ```
 
-If needed, create the database manually:
+AI keys are optional. Add one or more keys for the providers you intend to use:
 
-```bash
-createdb ecommerce_ai_db
+```env
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_API_KEY_2=
+GEMINI_API_KEY_3=
+# GEMINI_API_KEYS=comma-separated-keys
+SAMBANOVA_API_KEY=
+GROQ_API_KEY=
+OPENROUTER_API_KEY=
+GITHUB_MODELS_KEY=
+MISTRAL_API_KEY=
+CEREBRAS_API_KEY=
 ```
 
----
+Do not commit real credentials. The backend loads this file from `backend/.env`.
 
-## 🚀 Running the Project
+## Run locally
 
-### 1) Backend
+### 1. Start the backend
 
-```bash
+After resolving the backend dependency-manifest note above and installing the required packages:
+
+```powershell
 cd backend
 uv sync
 uv run python manage.py migrate
@@ -135,104 +100,43 @@ uv run python manage.py createsuperuser
 uv run python manage.py runserver
 ```
 
-The Django API will run at:
+The API is served at `http://127.0.0.1:8000/`; Django admin is at `http://127.0.0.1:8000/admin/`.
 
-- http://127.0.0.1:8000
+### 2. Start the frontend
 
-### 2) Frontend
+In a second terminal:
 
-Open a new terminal and run:
-
-```bash
+```powershell
 cd frontend
 npm install
 npm run dev
 ```
 
-The frontend app runs on:
+The npm `dev` script starts Vite at `http://127.0.0.1:3001/`. The frontend API client currently targets `http://127.0.0.1:8000/api`, and Django CORS/CSRF settings allow the configured local development origins.
 
-- http://127.0.0.1:3001
+## API overview
 
----
+All application endpoints are under `/api/`.
 
-## 🔐 Authentication and Admin Features
+| Area | Routes |
+| --- | --- |
+| Catalog | `/categories/`, `/products/`, `/store-highlights/` |
+| Reviews | `/reviews/`, `/products/<id>/analyze-ai/` |
+| Orders | `/orders/`, `/orders/<id>/cancel/` |
+| Discounts and banners | `/discounts/`, `/discounts/validate/`, `/banners/` |
+| Authentication and profile | `/auth/signup/`, `/auth/login/`, `/auth/logout/`, `/auth/profile/`, `/auth/google/` |
+| AI support | `/chat/support/` |
+| Admin | `/admin/users/`, `/admin/users/create-admin/`, `/admin/products/bulk-csv/`, `/admin/products/bulk-delete/`, `/admin/analytics/` |
 
-The app includes custom auth endpoints for:
+Catalog reads are public. Creating reviews and orders requires authentication; catalog changes, order administration, bulk operations, and admin endpoints require staff permissions. Authentication uses Django sessions, so API requests include credentials and unsafe requests use the CSRF token.
 
-- signup
-- login
-- logout
-- profile retrieval
-- Google login route (`/api/auth/google/`)
+## Development checks
 
-Admin-only endpoints support:
+From `frontend/`, run the production TypeScript check/build and ESLint:
 
-- listing users
-- creating admin users
-- deleting users
-- bulk CSV product import
-- bulk product deletion
-- analytics dashboard
-
----
-
-## 🤖 AI Features
-
-This project uses Google Gemini in the backend for:
-
-- product review sentiment analysis
-- AI shopping assistant recommendations
-- customer support chat responses
-
-These workflows are handled in:
-
-- `backend/api/ai_services.py`
-- `backend/api/views.py`
-
----
-
-## 📦 API Overview
-
-Main API groups include:
-
-- `/api/categories/`
-- `/api/products/`
-- `/api/reviews/`
-- `/api/orders/`
-- `/api/banners/`
-- `/api/discounts/`
-- `/api/auth/signup/`
-- `/api/auth/login/`
-- `/api/auth/profile/`
-- `/api/chat/support/`
-- `/api/admin/analytics/`
-
----
-
-## 🧪 Notes
-
-- The frontend CORS settings are configured for ports 3000, 3001, and 5173.
-- The backend uses Django session authentication and REST API flows for app interactions.
-- Product images and media files are stored under `backend/media/`.
-
----
-
-## 💡 Typical Development Flow
-
-```bash
-# Terminal 1
-cd backend
-uv run python manage.py runserver
-
-# Terminal 2
-cd frontend
-npm run dev
+```powershell
+npm run build
+npm run lint
 ```
 
-Then open the frontend in the browser and begin using the storefront, cart, and admin dashboards.
-
----
-
-## 📎 Project Purpose
-
-This project is designed as a modern ecommerce demonstration platform with real shopping flows and AI-enhanced support features, making it suitable for portfolio, demo, or learning purposes
+The backend's `api/tests.py` currently contains only Django's test scaffold; add application tests as features evolve.
