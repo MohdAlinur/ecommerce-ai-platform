@@ -146,6 +146,17 @@ export interface StoreHighlights {
   average_store_rating: number;
 }
 
+export interface SupportGuide {
+  id: number;
+  topic_slug: string;
+  title: string;
+  keywords: string;
+  response_markdown: string;
+  is_active: boolean;
+  hit_count: number;
+  updated_at?: string;
+}
+
 export interface AnalyticsData {
   metrics: {
     total_revenue: number;

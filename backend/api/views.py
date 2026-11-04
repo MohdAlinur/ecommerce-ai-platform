@@ -23,20 +23,19 @@ from rest_framework.response import Response
 
 from .models import (
     Category, Product, Review, Order, OrderItem,
-    CustomerProfile, Banner, DiscountCode, cleanup_empty_categories
+    CustomerProfile, Banner, DiscountCode, SupportKnowledgeBase, cleanup_empty_categories
 )
 from .serializers import (
     CategorySerializer, ProductSerializer, ReviewSerializer,
-    OrderSerializer, UserSerializer, BannerSerializer, DiscountCodeSerializer
+    OrderSerializer, UserSerializer, BannerSerializer,
+    DiscountCodeSerializer, SupportKnowledgeBaseSerializer
 )
-from .ai_services import analyze_product_reviews_ai, generate_support_chat_reply
+from .ai_services import (
+    analyze_product_reviews_ai, generate_support_chat_reply, ensure_default_support_kb
+)
 
 csv.field_size_limit(2147483647)
 
-
-# ==============================================================================
-# PAYMENT VALIDATION & CARD PROCESSING HELPERS
-# ==============================================================================
 
 def detect_card_brand(card_number: str) -> str:
     digits = re.sub(r'\D', '', card_number or '')
@@ -83,17 +82,10 @@ def validate_card_expiry(expiry_str: str) -> bool:
 
 
 def restore_order_stock(order: Order):
-    """
-    Restores product stock when an order is cancelled or refunded.
-    """
     for item in order.items.select_related('product').all():
         if item.product:
             Product.objects.filter(id=item.product.id).update(stock=F('stock') + item.quantity)
 
-
-# ==============================================================================
-# VIEWSETS
-# ==============================================================================
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.annotate(product_count=Count('products')).order_by('name')
@@ -472,6 +464,23 @@ class DiscountCodeViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminUser]
 
 
+class SupportKnowledgeBaseViewSet(viewsets.ModelViewSet):
+    """
+    Allows Admins to add, edit, toggle, and delete 0-token Customer Service FAQ
+    guides directly from the Admin Console.
+    """
+    serializer_class = SupportKnowledgeBaseSerializer
+
+    def get_queryset(self):
+        ensure_default_support_kb()
+        return SupportKnowledgeBase.objects.all().order_by('-hit_count', 'id')
+
+    def get_permissions(self):
+        if self.action in ['create', 'update', 'partial_update', 'destroy']:
+            return [IsAdminUser()]
+        return [AllowAny()]
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def validate_discount_view(request):
@@ -525,10 +534,6 @@ def store_highlights_view(request):
         "average_store_rating": round(float(avg_rating), 1)
     })
 
-
-# ==============================================================================
-# AUTHENTICATION & CUSTOMER PROFILE
-# ==============================================================================
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -744,10 +749,6 @@ def user_profile_view(request):
     profile.save()
     return Response(UserSerializer(user, context={'request': request}).data)
 
-
-# ==============================================================================
-# ADMIN CONSOLE ENDPOINTS
-# ==============================================================================
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
@@ -993,10 +994,6 @@ def admin_bulk_delete_products_view(request):
         return Response({"error": f"Failed to delete products: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-# ==============================================================================
-# TOKEN-OPTIMIZED AI ENDPOINTS (CACHED + MULTI-MODEL + ZERO-QUOTA FALLBACK)
-# ==============================================================================
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def analyze_product_ai_view(request, product_id):
@@ -1027,10 +1024,6 @@ def ai_customer_support_view(request):
     )
     return Response({"reply": reply}, status=status.HTTP_200_OK)
 
-
-# ==============================================================================
-# EXECUTIVE ADMIN ANALYTICS
-# ==============================================================================
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])

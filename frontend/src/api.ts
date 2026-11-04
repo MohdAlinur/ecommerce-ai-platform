@@ -30,7 +30,6 @@ api.interceptors.request.use((config) => {
     if (csrfToken) {
       config.headers['X-CSRFToken'] = csrfToken;
     }
-    // Clear short GET cache whenever any mutation happens
     shortGetCache.clear();
   }
   return config;
@@ -38,11 +37,6 @@ api.interceptors.request.use((config) => {
   return Promise.reject(error);
 });
 
-// ============================================================================
-// IN-FLIGHT REQUEST DEDUPLICATOR & 2-SECOND BURST CACHE
-// Prevents App.tsx + StorePage.tsx + React StrictMode from firing 4 identical
-// 403KB GET /api/products/ calls simultaneously on page load.
-// ============================================================================
 const inFlightRequests = new Map<string, Promise<any>>();
 const shortGetCache = new Map<string, { data: any; timestamp: number }>();
 const BURST_TTL_MS = 2500;
@@ -152,5 +146,20 @@ export const bulkImportCSV = (file: File) => {
 
 export const bulkDeleteProducts = (productIds: number[]) =>
   api.post('/admin/products/bulk-delete/', { product_ids: productIds }).then(res => res.data);
+
+// ============================================================================
+// CUSTOMER SERVICE FAQ KNOWLEDGE BASE API (0-Token Database Guides)
+// ============================================================================
+export const fetchSupportGuides = () =>
+  api.get('/support-guides/').then(res => res.data);
+
+export const createSupportGuide = (data: { title: string; keywords: string; response_markdown: string; is_active?: boolean }) =>
+  api.post('/support-guides/', data).then(res => res.data);
+
+export const updateSupportGuide = (id: number, data: Partial<{ title: string; keywords: string; response_markdown: string; is_active: boolean }>) =>
+  api.patch(`/support-guides/${id}/`, data).then(res => res.data);
+
+export const deleteSupportGuide = (id: number) =>
+  api.delete(`/support-guides/${id}/`).then(res => res.data);
 
 export default api;

@@ -2,17 +2,19 @@ import React, { useEffect, useState } from 'react';
 import {
   LayoutDashboard, Package, ShoppingCart, Users, Tag,
   Plus, Trash2, Edit2, Shield, CheckCircle, Truck, X, Upload, Download,
-  Layers, Info, ListTree, ImagePlus, Box, AlertTriangle, Search, CreditCard, Star, Sparkles
+  Layers, Info, ListTree, ImagePlus, Box, AlertTriangle, Search, CreditCard,
+  Star, Sparkles, Bot, BookOpen
 } from 'lucide-react';
-import type { AnalyticsData, Category, Product, UserProfile, OrderData } from '../types';
+import type { AnalyticsData, Category, Product, UserProfile, OrderData, SupportGuide } from '../types';
 import api, {
   fetchAdminAnalytics, fetchCategories, createCategory, createProduct,
   updateProduct, patchProduct, deleteProduct, fetchAllUsers, deleteUserAccount,
-  fetchProducts, createAdminUser, bulkImportCSV, bulkDeleteProducts
+  fetchProducts, createAdminUser, bulkImportCSV, bulkDeleteProducts,
+  fetchSupportGuides, createSupportGuide, updateSupportGuide, deleteSupportGuide
 } from '../api';
 
 export const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'catalog' | 'crm' | 'marketing'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'catalog' | 'crm' | 'marketing' | 'support-kb'>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,6 +25,7 @@ export const AdminDashboard: React.FC = () => {
   const [orders, setOrders] = useState<OrderData[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [discounts, setDiscounts] = useState<any[]>([]);
+  const [supportGuides, setSupportGuides] = useState<SupportGuide[]>([]);
 
   const [catalogSearch, setCatalogSearch] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
@@ -34,6 +37,16 @@ export const AdminDashboard: React.FC = () => {
   const [editingProductId, setEditingProductId] = useState<number | null>(null);
   const [showAddAdminModal, setShowAddAdminModal] = useState(false);
   const [newAdmin, setNewAdmin] = useState({ name: '', phone: '', email: '', password: '' });
+
+  // Customer Service FAQ Guide Modal State
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [editingGuideId, setEditingGuideId] = useState<number | null>(null);
+  const [guideForm, setGuideForm] = useState({
+    title: '',
+    keywords: '',
+    response_markdown: '',
+    is_active: true
+  });
 
   const [selectedProductIds, setSelectedProductIds] = useState<number[]>([]);
   const [productFormTab, setProductFormTab] = useState<'vital' | 'offer' | 'variants' | 'images' | 'description'>('vital');
@@ -65,14 +78,15 @@ export const AdminDashboard: React.FC = () => {
   const loadAdminData = async () => {
     try {
       setLoading(true);
-      const [analyticsRes, catsRes, usersRes, prodsRes, ordersRes, reviewsRes, discountRes] = await Promise.all([
+      const [analyticsRes, catsRes, usersRes, prodsRes, ordersRes, reviewsRes, discountRes, guidesRes] = await Promise.all([
         fetchAdminAnalytics(),
         fetchCategories(),
         fetchAllUsers(),
         fetchProducts(),
         api.get('/orders/').then(r => r.data),
         api.get('/reviews/').then(r => r.data),
-        api.get('/discounts/').then(r => r.data)
+        api.get('/discounts/').then(r => r.data),
+        fetchSupportGuides().catch(() => [])
       ]);
 
       setData(analyticsRes);
@@ -82,6 +96,7 @@ export const AdminDashboard: React.FC = () => {
       setOrders(ordersRes);
       setReviews(reviewsRes);
       setDiscounts(discountRes);
+      setSupportGuides(guidesRes);
       setError(null);
       window.dispatchEvent(new CustomEvent('catalog-updated'));
     } catch {
@@ -269,6 +284,69 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // ============================================================================
+  // CUSTOMER SERVICE FAQ GUIDE HANDLERS
+  // ============================================================================
+  const handleOpenNewGuideModal = () => {
+    setEditingGuideId(null);
+    setGuideForm({
+      title: '',
+      keywords: '',
+      response_markdown: '',
+      is_active: true
+    });
+    setShowGuideModal(true);
+  };
+
+  const handleOpenEditGuideModal = (guide: SupportGuide) => {
+    setEditingGuideId(guide.id);
+    setGuideForm({
+      title: guide.title,
+      keywords: guide.keywords,
+      response_markdown: guide.response_markdown,
+      is_active: guide.is_active
+    });
+    setShowGuideModal(true);
+  };
+
+  const handleSaveSupportGuide = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guideForm.title.trim() || !guideForm.keywords.trim() || !guideForm.response_markdown.trim()) {
+      return alert('Please fill in the title, trigger keywords, and step-by-step response.');
+    }
+    try {
+      if (editingGuideId !== null) {
+        await updateSupportGuide(editingGuideId, guideForm);
+      } else {
+        await createSupportGuide(guideForm);
+      }
+      setShowGuideModal(false);
+      const updated = await fetchSupportGuides();
+      setSupportGuides(updated);
+    } catch {
+      alert('Failed to save Customer Service guide.');
+    }
+  };
+
+  const handleToggleGuideActive = async (guide: SupportGuide) => {
+    try {
+      const updated = await updateSupportGuide(guide.id, { is_active: !guide.is_active });
+      setSupportGuides(prev => prev.map(g => (g.id === guide.id ? updated : g)));
+    } catch {
+      alert('Failed to toggle guide status.');
+    }
+  };
+
+  const handleDeleteSupportGuide = async (id: number) => {
+    if (!confirm('Delete this Customer Service FAQ guide?')) return;
+    try {
+      await deleteSupportGuide(id);
+      setSupportGuides(prev => prev.filter(g => g.id !== id));
+    } catch {
+      alert('Failed to delete guide.');
+    }
+  };
+
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const formData = new FormData();
@@ -306,7 +384,6 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Specification & Variant Builders (Preserved 100% from original code)
   const addSpecGroup = () => setNewProd({ ...newProd, specifications: [...newProd.specifications, { groupName: 'New Group', features: [{ key: '', value: '' }] }] });
   const removeSpecGroup = (idx: number) => setNewProd({ ...newProd, specifications: newProd.specifications.filter((_, i) => i !== idx) });
   const addSpecFeature = (idx: number) => {
@@ -325,7 +402,6 @@ export const AdminDashboard: React.FC = () => {
   const addGalleryImage = () => setNewProd({ ...newProd, image_gallery: [...newProd.image_gallery, ''] });
   const removeGalleryImage = (idx: number) => setNewProd({ ...newProd, image_gallery: newProd.image_gallery.filter((_, i) => i !== idx) });
 
-  // Catalog filtering (Search + Category / Featured pill filter)
   const filteredCatalog = products.filter(p => {
     const matchesSearch =
       p.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
@@ -340,6 +416,7 @@ export const AdminDashboard: React.FC = () => {
   });
 
   const filteredOrders = orders.filter(o => (orderFilter === 'ALL' ? true : o.status === orderFilter));
+  const totalZeroTokenHits = supportGuides.reduce((sum, g) => sum + (g.hit_count || 0), 0);
 
   if (loading) return <div className="p-24 text-center font-bold text-slate-500">Loading Enterprise Admin Console...</div>;
   if (error) return <div className="p-24 text-center font-bold text-rose-600">{error}</div>;
@@ -360,6 +437,7 @@ export const AdminDashboard: React.FC = () => {
             { id: 'catalog', icon: Package, label: `Catalog (${products.length})` },
             { id: 'crm', icon: Users, label: `Customers (${users.length})` },
             { id: 'marketing', icon: Tag, label: 'Promos & Reviews' },
+            { id: 'support-kb', icon: Bot, label: `AI Support KB (${supportGuides.length})` },
           ].map(item => (
             <button
               key={item.id}
@@ -380,8 +458,14 @@ export const AdminDashboard: React.FC = () => {
         {/* Top Header */}
         <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-900 capitalize tracking-tight">{activeTab}</h1>
-            <p className="text-xs text-slate-500">Real-time store operations and database management</p>
+            <h1 className="text-2xl font-black text-slate-900 capitalize tracking-tight">
+              {activeTab === 'support-kb' ? 'AI Customer Service Knowledge Base' : activeTab}
+            </h1>
+            <p className="text-xs text-slate-500">
+              {activeTab === 'support-kb'
+                ? 'Manage step-by-step website guides served directly from PostgreSQL using 0 AI tokens'
+                : 'Real-time store operations and database management'}
+            </p>
           </div>
 
           {activeTab === 'catalog' && (
@@ -418,6 +502,12 @@ export const AdminDashboard: React.FC = () => {
           {activeTab === 'crm' && (
             <button onClick={() => setShowAddAdminModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
               <Shield className="w-3.5 h-3.5" /> Add Staff Admin
+            </button>
+          )}
+
+          {activeTab === 'support-kb' && (
+            <button onClick={handleOpenNewGuideModal} className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition shadow-sm">
+              <Plus className="w-3.5 h-3.5" /> Add Support FAQ Guide
             </button>
           )}
         </header>
@@ -611,10 +701,9 @@ export const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 3: CATALOG (Clean Minimalist Toolbar + Well-Positioned Search Bar + Distinct Featured Pill) */}
+        {/* TAB 3: CATALOG */}
         {activeTab === 'catalog' && (
           <div className="space-y-4">
-            {/* Clean Minimalist Filter & Search Card */}
             <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
               <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
@@ -625,7 +714,6 @@ export const AdminDashboard: React.FC = () => {
                   </span>
                 </div>
 
-                {/* Spacious, Properly Positioned Search Input */}
                 <div className="relative w-full sm:w-80 md:w-96 shrink-0">
                   <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
                   <input
@@ -647,7 +735,6 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Clean Wrapping Category Filter Pills (Zero Ugly Scrollbar) */}
               <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -692,7 +779,6 @@ export const AdminDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Catalog Table */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden overflow-x-auto">
               <table className="w-full text-left text-xs min-w-[820px]">
                 <thead className="bg-slate-50/80 text-slate-400 border-b border-slate-100 uppercase tracking-wider text-[10px]">
@@ -736,7 +822,6 @@ export const AdminDashboard: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* DISTINCT FEATURED BADGE BUTTON (Visually different from Edit/Delete buttons) */}
                       <td className="p-4">
                         <button
                           type="button"
@@ -879,7 +964,178 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* TAB 6: AI CUSTOMER SERVICE FAQ KNOWLEDGE BASE (0-Token PostgreSQL Guides) */}
+        {activeTab === 'support-kb' && (
+          <div className="space-y-5">
+            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Zero-Token Customer Service Engine</h3>
+                  <p className="text-xs text-slate-500">
+                    When a customer asks a question matching any trigger keyword below, Aura AI replies directly from PostgreSQL in &lt;5ms using <strong>0 API tokens</strong>.
+                  </p>
+                </div>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-100 px-4 py-2.5 rounded-2xl text-center shrink-0">
+                <span className="block text-lg font-black text-emerald-700">{totalZeroTokenHits}</span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">0-Token Replies Served</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {supportGuides.map(guide => (
+                <div
+                  key={guide.id}
+                  className={`bg-white rounded-3xl border p-6 shadow-sm flex flex-col justify-between transition ${
+                    guide.is_active ? 'border-slate-100' : 'border-slate-200 opacity-60'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <span className="text-[10px] font-mono text-slate-400 uppercase">#{guide.topic_slug}</span>
+                        <h4 className="font-black text-base text-slate-900 tracking-tight">{guide.title}</h4>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[10px] font-black">
+                          {guide.hit_count} Hits
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleGuideActive(guide)}
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold transition ${
+                            guide.is_active
+                              ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}
+                        >
+                          {guide.is_active ? 'Active' : 'Paused'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Trigger Keywords</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {guide.keywords.split(',').slice(0, 8).map((kw, i) => (
+                          <span key={i} className="px-2.5 py-0.5 bg-slate-100 text-slate-700 rounded-full text-[11px] font-semibold">
+                            {kw.trim()}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3.5 text-xs text-slate-600 whitespace-pre-wrap max-h-44 overflow-y-auto leading-relaxed">
+                      {guide.response_markdown}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditGuideModal(guide)}
+                      className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:border-indigo-200 text-slate-700 hover:text-indigo-600 text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" /> Edit Guide
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSupportGuide(guide.id)}
+                      className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:border-rose-200 text-slate-500 hover:text-rose-600 text-xs font-bold flex items-center gap-1.5 transition"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* Add / Edit Customer Service FAQ Guide Modal */}
+      {showGuideModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <form onSubmit={handleSaveSupportGuide} className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-2xl shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-xl font-black text-slate-900">
+                  {editingGuideId !== null ? 'Edit Customer Service Guide' : 'New Customer Service FAQ Guide'}
+                </h3>
+                <p className="text-xs text-slate-500">Stored in PostgreSQL and served at 0 AI tokens when matched</p>
+              </div>
+              <button type="button" onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-slate-900 p-1.5 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Guide Title *</label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. How to Create an Account & Sign In"
+                value={guideForm.title}
+                onChange={e => setGuideForm({ ...guideForm, title: e.target.value })}
+                className="w-full border border-slate-200 bg-slate-50 p-3 rounded-2xl text-xs font-semibold focus:bg-white focus:outline-none focus:border-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                Trigger Keywords (Comma-Separated Phrases) *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="create account, sign up, register, how to login, forgot password"
+                value={guideForm.keywords}
+                onChange={e => setGuideForm({ ...guideForm, keywords: e.target.value })}
+                className="w-full border border-slate-200 bg-slate-50 p-3 rounded-2xl text-xs font-semibold focus:bg-white focus:outline-none focus:border-slate-900"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">
+                Step-by-Step Response (Supports **Bold**, 1. Numbered Lists, * Bullets & [Links](/url)) *
+              </label>
+              <textarea
+                rows={8}
+                required
+                placeholder="**Step-by-Step Guide:**&#10;1. Click **Sign In** at the top-right...&#10;2. Enter your details..."
+                value={guideForm.response_markdown}
+                onChange={e => setGuideForm({ ...guideForm, response_markdown: e.target.value })}
+                className="w-full border border-slate-200 bg-slate-50 p-3.5 rounded-2xl text-xs font-mono leading-relaxed focus:bg-white focus:outline-none focus:border-slate-900"
+              />
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={guideForm.is_active}
+                  onChange={e => setGuideForm({ ...guideForm, is_active: e.target.checked })}
+                  className="w-4 h-4 accent-slate-900 rounded cursor-pointer"
+                />
+                <span className="text-xs font-bold text-slate-700">Active in AI Assistant</span>
+              </label>
+
+              <div className="flex gap-2.5">
+                <button type="button" onClick={() => setShowGuideModal(false)} className="px-5 py-2.5 border border-slate-200 rounded-full text-xs font-bold text-slate-600">
+                  Cancel
+                </button>
+                <button type="submit" className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-xs font-bold shadow-sm transition">
+                  {editingGuideId !== null ? 'Save Guide Changes' : 'Publish FAQ Guide'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* CSV Upload Modal */}
       {showCsvModal && (
@@ -930,7 +1186,7 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Add / Edit Product Modal (With Full Specifications Builder Restored) */}
+      {/* Add / Edit Product Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <form onSubmit={handleProductSubmit} className="bg-white rounded-3xl w-full max-w-4xl my-8 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
@@ -1096,7 +1352,6 @@ export const AdminDashboard: React.FC = () => {
                     <textarea rows={4} required className="w-full border border-slate-200 bg-slate-50 p-3 rounded-2xl text-xs" value={newProd.description} onChange={e => setNewProd({ ...newProd, description: e.target.value })} />
                   </div>
 
-                  {/* Full Specifications Builder */}
                   <div className="space-y-4 pt-4 border-t border-slate-100">
                     <div className="flex justify-between items-center">
                       <label className="text-xs font-black text-slate-900 uppercase tracking-widest">Specifications Builder (Multi-line values supported)</label>

@@ -16,25 +16,63 @@ import { CompareProvider, useCompare } from './context/CompareContext';
 import {
   Search, User, Shield, LogOut, Phone, ChevronDown, X, ShoppingCart,
   CreditCard, Smartphone, Truck, Bot, Send, Sparkles, Bookmark, Scale,
-  Eye, EyeOff, Menu, ShoppingBag, CheckCircle, Trash2, Lock, Tag, AlertCircle, MapPin
+  Eye, EyeOff, Menu, ShoppingBag, CheckCircle, Trash2, Lock, Tag, AlertCircle, MapPin, ExternalLink
 } from 'lucide-react';
 
 const slugify = (text: string) =>
   text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-');
 
-// Zero-dependency Markdown formatter for AI Chat bubbles (**bold**, bullets, numbered lists)
+// Zero-dependency Markdown formatter for AI Chat bubbles:
+// Supports **bold**, bullets, numbered lists, clickable internal /product/:id/:slug links, and external Daraz/Amazon/Alibaba links!
 function renderChatMarkdown(text: string, isUser: boolean = false) {
-  const formatInline = (line: string): React.ReactNode[] => {
-    const parts = line.split(/(\*\*.*?\*\*)/g);
-    return parts.map((part, idx) => {
-      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+  const formatInline = (rawLine: string): React.ReactNode[] => {
+    const normalized = rawLine.replace(/\*\*(\[[^\]]+\]\([^)]+\))\*\*/g, '$1');
+    const tokens = normalized.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g);
+
+    return tokens.map((tok, idx) => {
+      const linkMatch = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        const label = linkMatch[1].replace(/\*\*/g, '').trim();
+        const url = linkMatch[2].trim();
+
+        if (url.startsWith('/')) {
+          return (
+            <a
+              key={idx}
+              href={url}
+              className={`inline-flex items-center gap-1 font-black underline underline-offset-2 transition ${
+                isUser ? 'text-white hover:text-indigo-200' : 'text-indigo-600 hover:text-indigo-800'
+              }`}
+            >
+              <ShoppingBag className="w-3 h-3 shrink-0 inline" />
+              <span>{label}</span>
+            </a>
+          );
+        }
+
+        return (
+          <a
+            key={idx}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 my-0.5 rounded-full text-[11px] font-bold bg-slate-900 text-white hover:bg-indigo-600 transition shadow-sm"
+          >
+            <span>{label}</span>
+            <ExternalLink className="w-3 h-3 shrink-0" />
+          </a>
+        );
+      }
+
+      if (tok.startsWith('**') && tok.endsWith('**') && tok.length > 4) {
         return (
           <strong key={idx} className={isUser ? 'font-black text-white' : 'font-black text-slate-900'}>
-            {part.slice(2, -2)}
+            {tok.slice(2, -2)}
           </strong>
         );
       }
-      return <React.Fragment key={idx}>{part}</React.Fragment>;
+
+      return <React.Fragment key={idx}>{tok}</React.Fragment>;
     });
   };
 
@@ -79,7 +117,7 @@ function renderChatMarkdown(text: string, isUser: boolean = false) {
 
 const getCachedAiReply = (key: string): string | null => {
   try {
-    const raw = sessionStorage.getItem('aura_ai_chat_cache_v1');
+    const raw = sessionStorage.getItem('aura_ai_chat_cache_v2');
     if (!raw) return null;
     const map = JSON.parse(raw);
     return map[key] || null;
@@ -90,10 +128,10 @@ const getCachedAiReply = (key: string): string | null => {
 
 const setCachedAiReply = (key: string, reply: string) => {
   try {
-    const raw = sessionStorage.getItem('aura_ai_chat_cache_v1');
+    const raw = sessionStorage.getItem('aura_ai_chat_cache_v2');
     const map = raw ? JSON.parse(raw) : {};
     map[key] = reply;
-    sessionStorage.setItem('aura_ai_chat_cache_v1', JSON.stringify(map));
+    sessionStorage.setItem('aura_ai_chat_cache_v2', JSON.stringify(map));
   } catch {
     // Ignore storage quota errors
   }
@@ -1147,7 +1185,7 @@ function CompareDrawer() {
 const AIAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([
-    { role: 'ai', content: 'Hi! I am your **AuraTech AI**. I can find the best products for you, answer technical questions, or compare items. How can I help?' }
+    { role: 'ai', content: 'Hi! I am your **AuraTech AI Shopping & Customer Service Assistant**. Ask me to find or compare products, or ask how to create an account and place an order!' }
   ]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -1176,7 +1214,9 @@ const AIAssistant: React.FC = () => {
 
       const contextPayload = JSON.stringify({
         comparison_data: items.map(i => ({
+          id: i.id,
           name: i.name,
+          category: i.category_name || 'Tech',
           brand: i.brand,
           price: i.cash_discount_price,
           features: Array.isArray(i.key_features) ? i.key_features.slice(0, 3) : [],
@@ -1256,9 +1296,9 @@ const AIAssistant: React.FC = () => {
   };
 
   const quickActions = [
-    'Gaming laptop under ৳100,000',
-    'Best monitor for office work?',
-    'Help me choose a smartphone'
+    'Help me choose a smartphone',
+    'How to purchase a product?',
+    'How to create an account?'
   ];
 
   return (
@@ -1286,7 +1326,7 @@ const AIAssistant: React.FC = () => {
             </div>
             <div className="min-w-0">
               <h3 className="font-black text-white text-lg tracking-tight leading-tight">Aura AI</h3>
-              <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">Shopping Assistant</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">Shopping & Customer Care</span>
             </div>
           </div>
           <button onClick={() => setIsOpen(false)} aria-label="Close assistant" className="hover:bg-white/10 p-2 rounded-full transition text-slate-300 hover:text-white shrink-0">
@@ -1347,7 +1387,7 @@ const AIAssistant: React.FC = () => {
               }
             }}
             rows={Math.min(3, Math.max(1, input.split('\n').length))}
-            placeholder={cooldown > 0 ? `Ready in ${cooldown}s...` : 'Message AI Agent...'}
+            placeholder={cooldown > 0 ? `Ready in ${cooldown}s...` : 'Ask about products, orders, or help...'}
             className="flex-1 min-w-0 bg-slate-100 border border-transparent px-4 py-3 rounded-2xl text-base sm:text-sm outline-none text-slate-700 focus:bg-white focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 transition-all resize-none leading-relaxed"
           />
           <button

@@ -7,6 +7,7 @@ from .views import (
     OrderViewSet,
     BannerViewSet,
     DiscountCodeViewSet,
+    SupportKnowledgeBaseViewSet,
     signup_view,
     login_view,
     google_login_view,
@@ -32,21 +33,19 @@ router.register(r'reviews', ReviewViewSet, basename='review')
 router.register(r'orders', OrderViewSet, basename='order')
 router.register(r'banners', BannerViewSet, basename='banner')
 router.register(r'discounts', DiscountCodeViewSet, basename='discount')
+router.register(r'support-guides', SupportKnowledgeBaseViewSet, basename='support-guide')
 
 urlpatterns = [
-    # Order & Discount custom routes (placed before router to avoid lookup collisions)
     path('orders/<int:order_id>/cancel/', cancel_order_view, name='cancel-order'),
     path('discounts/validate/', validate_discount_view, name='validate-discount'),
     path('store-highlights/', store_highlights_view, name='store-highlights'),
 
-    # Authentication & Profile
     path('auth/signup/', signup_view, name='signup'),
     path('auth/login/', login_view, name='login'),
     path('auth/google/', google_login_view, name='google-login'),
     path('auth/logout/', logout_view, name='logout'),
     path('auth/profile/', user_profile_view, name='user-profile'),
 
-    # Admin Management
     path('admin/users/', admin_list_users, name='admin-users'),
     path('admin/users/<int:user_id>/', admin_delete_user, name='admin-delete-user'),
     path('admin/users/create-admin/', admin_create_admin_view, name='admin-create-admin'),
@@ -54,10 +53,8 @@ urlpatterns = [
     path('admin/products/bulk-delete/', admin_bulk_delete_products_view, name='admin-bulk-delete'),
     path('admin/analytics/', admin_analytics_view, name='admin-analytics'),
 
-    # AI Services
     path('products/<int:product_id>/analyze-ai/', analyze_product_ai_view, name='analyze-product-ai'),
     path('chat/support/', ai_customer_support_view, name='ai-customer-support'),
 
-    # Standard REST ViewSets
     path('', include(router.urls)),
 ]

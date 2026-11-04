@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Count
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
 
@@ -52,10 +52,6 @@ def cleanup_empty_categories():
 
 @receiver(post_delete, sender=Product)
 def auto_delete_empty_category_on_product_delete(sender, instance, **kwargs):
-    """
-    Triggered automatically whenever a Product is deleted (single or bulk).
-    If the product's category has no remaining products, delete the category.
-    """
     if instance.category_id:
         if not Product.objects.filter(category_id=instance.category_id).exists():
             Category.objects.filter(id=instance.category_id).delete()
@@ -110,7 +106,6 @@ class Order(models.Model):
     country = models.CharField(max_length=100, blank=True, null=True, default='Bangladesh')
     order_notes = models.TextField(blank=True, null=True)
 
-    # Payment & Transaction Details (PCI-Safe Masked Metadata)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default='cod')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS, default='UNPAID')
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
@@ -122,7 +117,6 @@ class Order(models.Model):
     bkash_trx_id = models.CharField(max_length=100, blank=True, null=True)
     paid_at = models.DateTimeField(blank=True, null=True)
 
-    # Financial Breakdown
     subtotal_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     discount_code = models.CharField(max_length=30, blank=True, null=True)
@@ -143,7 +137,6 @@ class Order(models.Model):
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
-    # SET_NULL prevents ProtectedError when deleting products that were ordered in the past
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True)
     product_name_snapshot = models.CharField(max_length=255, blank=True, default='')
     selected_variants = models.JSONField(default=dict, blank=True)
@@ -174,9 +167,6 @@ class CustomerProfile(models.Model):
 
 
 class Banner(models.Model):
-    """
-    Retained in schema for migration safety; storefront now uses dynamic minimal layout.
-    """
     title = models.CharField(max_length=100)
     image = models.ImageField(upload_to='banners/', null=True, blank=True)
     image_url = models.URLField(max_length=500, blank=True, null=True)
@@ -197,3 +187,39 @@ class DiscountCode(models.Model):
 
     def __str__(self):
         return self.code
+
+
+# ==============================================================================
+# ZERO-TOKEN DATABASE CUSTOMER SERVICE KNOWLEDGE BASE & PERSISTENT AI CACHE
+# ==============================================================================
+class SupportKnowledgeBase(models.Model):
+    """
+    Stores step-by-step website guides & customer service FAQs in PostgreSQL.
+    Matched queries are answered directly from the database using 0 AI tokens!
+    """
+    topic_slug = models.CharField(max_length=100, unique=True)
+    title = models.CharField(max_length=200)
+    keywords = models.TextField(help_text="Comma-separated trigger phrases")
+    response_markdown = models.TextField()
+    is_active = models.BooleanField(default=True)
+    hit_count = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.title} ({self.hit_count} hits)"
+
+
+class AIChatCacheEntry(models.Model):
+    """
+    Stores generated AI responses in PostgreSQL so repeated questions across
+    all users and server restarts cost 0 tokens.
+    """
+    cache_key = models.CharField(max_length=64, unique=True, db_index=True)
+    question = models.CharField(max_length=500)
+    reply_markdown = models.TextField()
+    hit_count = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.question[:50]} ({self.hit_count} hits)"

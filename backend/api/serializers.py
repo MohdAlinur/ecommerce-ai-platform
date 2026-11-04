@@ -6,7 +6,7 @@ from django.db.models import Avg
 
 from .models import (
     Category, Product, Review, Order, OrderItem,
-    CustomerProfile, Banner, DiscountCode
+    CustomerProfile, Banner, DiscountCode, SupportKnowledgeBase
 )
 
 
@@ -146,15 +146,12 @@ class UserSerializer(serializers.ModelSerializer):
             'default_shipping_address', 'shipping_address', 'city', 'postal_code', 'country',
             'date_joined'
         ]
-        # SECURITY FIX: Prevent privilege escalation via profile update
         read_only_fields = ['id', 'is_staff', 'is_superuser', 'date_joined']
 
     def get_avatar_url(self, obj):
         try:
             profile = obj.customer_profile
             if profile and profile.avatar:
-                # Return relative path '/media/avatars/...' so existing frontend
-                # `http://127.0.0.1:8000${user.avatar_url}` works without double-prefixing
                 return profile.avatar.url
         except ObjectDoesNotExist:
             return None
@@ -209,7 +206,6 @@ class UserSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         password = validated_data.pop('password', None)
-        # Never allow privilege escalation through serializer update
         validated_data.pop('is_staff', None)
         validated_data.pop('is_superuser', None)
 
@@ -246,3 +242,35 @@ class DiscountCodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = DiscountCode
         fields = '__all__'
+
+
+class SupportKnowledgeBaseSerializer(serializers.ModelSerializer):
+    topic_slug = serializers.SlugField(required=False, allow_blank=True)
+
+    class Meta:
+        model = SupportKnowledgeBase
+        fields = [
+            'id', 'topic_slug', 'title', 'keywords',
+            'response_markdown', 'is_active', 'hit_count', 'updated_at'
+        ]
+        read_only_fields = ['hit_count', 'updated_at']
+
+    def create(self, validated_data):
+        title = validated_data.get('title', '').strip()
+        slug = validated_data.get('topic_slug') or slugify(title) or 'support-guide'
+
+        original_slug = slug
+        counter = 1
+        while SupportKnowledgeBase.objects.filter(topic_slug=slug).exists():
+            slug = f"{original_slug}-{counter}"
+            counter += 1
+
+        validated_data['topic_slug'] = slug
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if 'title' in validated_data and not validated_data.get('topic_slug'):
+            new_slug = slugify(validated_data['title'])
+            if new_slug and not SupportKnowledgeBase.objects.exclude(id=instance.id).filter(topic_slug=new_slug).exists():
+                validated_data['topic_slug'] = new_slug
+        return super().update(instance, validated_data)

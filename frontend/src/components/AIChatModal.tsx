@@ -1,24 +1,62 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Send, X, Sparkles } from 'lucide-react';
+import { Bot, Send, X, Sparkles, ExternalLink, ShoppingBag } from 'lucide-react';
 import { sendSupportChatMessage } from '../api';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Product } from '../types';
 
 const modalChatCache = new Map<string, string>();
 
-// Clean zero-dependency Markdown formatter for bolding, bullets & numbered lists
+// Renders Markdown bolding, bullets, clickable internal product links, and external Daraz/Amazon/Alibaba buttons
 function renderFormattedMarkdown(text: string, isUser: boolean = false) {
-  const formatInline = (line: string): React.ReactNode[] => {
-    const parts = line.split(/(\*\*.*?\*\*)/g);
-    return parts.map((part, idx) => {
-      if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+  const formatInline = (rawLine: string): React.ReactNode[] => {
+    // Normalize **[Label](url)** into [Label](url)
+    const normalized = rawLine.replace(/\*\*(\[[^\]]+\]\([^)]+\))\*\*/g, '$1');
+    const tokens = normalized.split(/(\[[^\]]+\]\([^)]+\)|\*\*[^*]+\*\*)/g);
+
+    return tokens.map((tok, idx) => {
+      const linkMatch = tok.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        const label = linkMatch[1].replace(/\*\*/g, '').trim();
+        const url = linkMatch[2].trim();
+
+        if (url.startsWith('/')) {
+          return (
+            <a
+              key={idx}
+              href={url}
+              className={`inline-flex items-center gap-1 font-black underline underline-offset-2 transition ${
+                isUser ? 'text-white hover:text-indigo-200' : 'text-indigo-600 hover:text-indigo-800'
+              }`}
+            >
+              <ShoppingBag className="w-3 h-3 shrink-0 inline" />
+              <span>{label}</span>
+            </a>
+          );
+        }
+
+        return (
+          <a
+            key={idx}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 px-3 py-1 my-0.5 rounded-full text-xs font-bold bg-slate-900 text-white hover:bg-indigo-600 transition shadow-sm"
+          >
+            <span>{label}</span>
+            <ExternalLink className="w-3 h-3 shrink-0" />
+          </a>
+        );
+      }
+
+      if (tok.startsWith('**') && tok.endsWith('**') && tok.length > 4) {
         return (
           <strong key={idx} className={isUser ? 'font-black text-white' : 'font-black text-slate-900'}>
-            {part.slice(2, -2)}
+            {tok.slice(2, -2)}
           </strong>
         );
       }
-      return <React.Fragment key={idx}>{part}</React.Fragment>;
+
+      return <React.Fragment key={idx}>{tok}</React.Fragment>;
     });
   };
 
@@ -77,8 +115,8 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ isOpen, onClose, curre
     {
       sender: 'model',
       text: currentProduct
-        ? `Hello! I see you are looking at **${currentProduct.name}**. Ask me any technical questions about its specifications or features!`
-        : 'Hello! I am your **AuraTech AI Shopping Assistant**. Ask me anything about our products, recommendations, or policies!'
+        ? `Hello! I see you are looking at **${currentProduct.name}**. Ask me any technical questions, or ask how to order!`
+        : 'Hello! I am your **AuraTech AI Shopping & Customer Service Assistant**. Ask me for product recommendations, how to create an account, or how to purchase!'
     },
   ]);
   const [input, setInput] = useState('');
@@ -160,7 +198,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ isOpen, onClose, curre
                 <div>
                   <h3 className="font-black text-white text-lg tracking-tight leading-tight">Aura AI Agent</h3>
                   <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400">
-                    {currentProduct ? `Context: ${currentProduct.name.substring(0, 25)}...` : 'Token-Optimized Mode'}
+                    {currentProduct ? `Context: ${currentProduct.name.substring(0, 25)}...` : 'Shopping & Customer Service'}
                   </span>
                 </div>
               </div>
@@ -198,7 +236,7 @@ export const AIChatModal: React.FC<AIChatModalProps> = ({ isOpen, onClose, curre
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder={cooldown > 0 ? `Please wait ${cooldown}s...` : currentProduct ? `Ask anything about this ${currentProduct.brand || 'product'}...` : 'Ask about specs, recommendations...'}
+                placeholder={cooldown > 0 ? `Please wait ${cooldown}s...` : currentProduct ? `Ask anything about this ${currentProduct.brand || 'product'}...` : 'Ask about products, how to buy, or account help...'}
                 className="flex-1 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:border-slate-900 focus:bg-white transition"
               />
               <button
